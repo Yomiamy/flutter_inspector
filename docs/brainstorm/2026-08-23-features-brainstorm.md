@@ -104,20 +104,22 @@
 
 ## 🔍 排查能力現況盤點
 
-> **當前現況快照（v1.8.0，含 2026-07-27 更新）**：相較於初期有四個紅燈的盲區，經過多次迭代後，目前排查基礎建設已大幅補齊。v1.8.0 補上了 App 生命週期標記與 Error 視覺高亮強化，且 Inspector 污染 NavigatorTab 的缺陷亦已修復。紅燈僅剩 Console 搜尋/過濾；黃燈僅剩 ±5s 側欄。
+> **當前現況快照（v2.3.0 · 2026-08-23 實查更新）**：相較於初期有四個紅燈的盲區，經過多次迭代後，排查基礎建設已補齊。v1.8.0 補上 App 生命週期標記與 Error 視覺高亮強化、修復 Inspector 污染 NavigatorTab；**v1.9.0 週期的 PR #128 補齊 Console 搜尋/過濾，最後一盞紅燈已滅**。
+>
+> ⚠️ **本表原以 v1.8.0 為準且未隨後續版本更新**（原記「紅燈僅剩 Console 搜尋/過濾；黃燈僅剩 ±5s 側欄」），兩處皆已過期：紅燈已於 PR #128 滅；**±5s 側欄（§D3）已於 2026-07-24 否決，不該再計為黃燈缺口**——該需求的覆蓋者是既有的 `mergedTimeline()`，完整時間軸不預先挑什麼相關，把所有維度攤平讓排查者自己判斷。
 
 | 排查環節 | 現況 (v1.8.0) | 評級 |
 |---|---|---|
 | 看見「我主動 log 的」錯誤 | `inspector.log()` 正常記錄；`LogDetailView` 支援展開與分享，ConsoleTab 已新增 error 淡紅底高亮（PR #101） | ✅ 完善 |
 | 看見「未捕捉」的例外 | 已實作 `captureUncaughtErrors`；同一 build 崩潰重複記錄已去重消除（PR #96） | ✅ 完善 |
 | 看見網路失敗的根因 | 擷取 `err.type` 與 `stackTrace`；網路失敗判定收斂於 `NetworkEntry.isFailed`，且傳輸失敗也會產生群組摘要，並套用 error 高亮（PR #101） | ✅ 已修復 |
-| 關聯「錯誤前後發生了什麼」 | `mergedTimeline` 將四層事件歸併；v1.8.0 補上 `LifecycleHandler` 標記前景/背景與 top-most page（PR #100）；但仍缺 ±5s 聚焦側欄 | 🟡 尚欠聚焦 |
+| 關聯「錯誤前後發生了什麼」 | `mergedTimeline` 將四層事件歸併；v1.8.0 補上 `LifecycleHandler` 標記前景/背景與 top-most page（PR #100）；PR #128 補上「點擊過濾結果 → 清過濾 + 捲回該筆」的聚焦動線。~~±5s 側欄~~ 已否決（§D3），需求由 `mergedTimeline()` 覆蓋 | ✅ 完善 |
 | 帶走排查證據 | `buildDiagnosticReport`／`ExportReportSheet` 落地，`## Timeline` 四層交錯直接看出跨層因果 | ✅ 完善 |
-| 過濾定位 error log | `entriesAtLevel()` 仍未被 UI 呼叫，ConsoleTab 依然缺乏搜尋欄與 LogLevel 過濾器 | 🔴 依然不足 |
+| 過濾定位 error log | 搜尋欄 / LogLevel FilterChip / `⚡ Errors only` 已於 **PR #128**（2026-08-14）補齊，過濾邏輯為新寫的 `console_utils.dart`（`ConsoleFilter` + `applyConsoleFilter()`）吃四源混合流；`entriesAtLevel()` 因回傳型別接不上而未採用（見 §D1） | ✅ 完善 |
 | 排除 Inspector 自身干擾 | `pushInspectorRoute` 實裝，Inspector detail view 不再污染使用者 NavigatorTab 軌跡 (§D6) | ✅ 完善 |
 | 看見 WebView 內的事件 | 實作 `WebViewBridgeAdapter` 及 JS injection 腳本，無縫轉接日誌與請求；新增 `NetworkOrigin` 標記 | ✅ 完善 |
 
-> 結論：排查鏈條上的八個環節，如今**六個綠燈、一個黃燈、一個紅燈**。v1.8.0 解決了 NavigatorTab 污染、強化了 Error 視覺並補上生命週期時間軸。黃燈僅剩 ±5s 側欄，紅燈僅剩 Console 搜尋/過濾。
+> 結論（2026-08-23 更新）：排查鏈條上的八個環節，如今**八個全綠**。v1.8.0 解決 NavigatorTab 污染、強化 Error 視覺並補上生命週期時間軸；v1.9.0 的 PR #128 補齊 Console 搜尋/過濾並滅掉最後一盞紅燈；原記的黃燈（±5s 側欄）為已否決項，不計為缺口。**盤點表全綠不等於沒有待辦**——剩餘待辦是加分項而非鏈條缺口，見「下一步實作路徑」的 Tier 2 與 Tier 4。
 
 ---
 
@@ -477,6 +479,10 @@ ENTRIES: [NavigatorAction.push/NetworkDetailView, NavigatorAction.push/SizedBox]
     ⚠️ **路徑校正 (2026-08-06)**：此檔曾位於 `ui/dashboard/views/`，現已搬至
     `ui/dashboard/tabs/network/`（`log_detail_view.dart` 同步搬至 `tabs/console/`）。
     本文件其餘處若出現 `views/` 路徑均已過期，動工時以 `tabs/<domain>/` 為準。
+  - ⚠️ **第二次路徑校正 (2026-08-23)**：上一則只校正了 **detail view**，但本項要改的另一半 **formatter 不在該目錄**——
+    `buildCurl` / `buildPlainText` 實際位於 **`lib/src/utils/network_formatters.dart`**（`:105` / `:136`），
+    `tabs/network/` 下只有 `network_detail_view.dart` 一支。本項的寫入路徑因此橫跨兩處：
+    `utils/network_formatters.dart`（新增 formatter）+ `tabs/network/network_detail_view.dart`（`:13` enum 加一個值）。
   - **真正缺的只有**：把 cURL + status + error body + errorType + timestamp 組成單一
     Markdown fenced block 的 formatter（`network_formatters.dart` 新增一個函式）。
   - ⚠️ 注意 `diagnostic_report.dart:186` 已記載「固定 3-backtick fence 會被內容中的 fence 打斷」
@@ -645,16 +651,16 @@ ENTRIES: [NavigatorAction.push/NetworkDetailView, NavigatorAction.push/SizedBox]
 
 ### §P11. 多告警類型重構 NetworkNotifier（§P1 的後端支撐）— 🆕
 
-> **痛點**：§P1「錯誤爆發偵測」設想用既有系統通知基建做背景告警，但查核發現 `NetworkNotifier` 目前寫死「單一持續更新通知」（固定 notification id + channel），且 `AlertThrottler` 是它的私有欄位，不是共用元件。§P1 若直接動工會被迫在 `NetworkNotifier` 內部長出 if/else 分支去區分「網路摘要」與「錯誤爆發」兩種通知語意——這正是「特殊情況」的壞味道。
+> **痛點**：§P1「錯誤爆發偵測」設想用既有系統通知基建做背景告警，但查核發現 `NetworkNotifier` 目前寫死「單一持續更新通知」（固定 notification id + channel）。**⚠️ 實查校正（2026-08-23）**：原句後半「`AlertThrottler` 是它的私有欄位，不是共用元件」**已過時**——`network_notifier_io.dart:19,22` 已支援建構式注入（`AlertThrottler? throttler`，預設 `?? AlertThrottler()`），`_web` 分支簽章一致，持有關係無需再動。**本項真正剩餘的缺口只有 `:31` `_notificationId` 與 `:33` `_channelId` 兩個私有常數的參數化**，effort 應由 low 下修為 trivial~low。§P1 若直接動工會被迫在 `NetworkNotifier` 內部長出 if/else 分支去區分「網路摘要」與「錯誤爆發」兩種通知語意——這正是「特殊情況」的壞味道。
 
 * **好品味設計**：
   > 把「一則通知」抽象成 `id` + `channel` 兩個參數，`NetworkNotifier` 變成這個通用能力的其中一個**呼叫者**，而非通知邏輯本身的擁有者。
-  - `AlertThrottler` 保持純邏輯不變（已經是通用的），但改由呼叫端各自持有一份實例（`NetworkNotifier` 一份、未來 §P1 的錯誤告警一份），而非塞在 `NetworkNotifier` 內部
+  - ~~`AlertThrottler` 改由呼叫端各自持有一份實例，而非塞在 `NetworkNotifier` 內部~~ — ✅ **已具備**（2026-08-23 實查）：建構式已可注入，§P1 的錯誤告警直接傳入自己那份即可，無需改動
   - 新增輕量的 `InspectorNotificationChannel`（或直接是幾個具名常數：`networkChannelId`/`errorAlertChannelId`），讓 `flutter_local_notifications` 的初始化一次註冊多個 channel
   - `NetworkNotifier.showOrUpdate()` 簽章不變（既有呼叫者零修改），只是內部改用參數化的 channel id
 * **重用**：`AlertThrottler`（邏輯零修改，只改持有關係）、`flutter_local_notifications` 初始化流程、`_io`/`_web` 平台分支模式
 * **品味守則**：這是**重構**不是新功能——目的是讓 §P1 能落地時不必重新發明節流器，也不必在通知模組裡塞 if/else 分special-case。若 §P1 最終不做，這項重構本身沒有獨立存在的理由，**應與 §P1 綁定排程**，不要單獨動工。
-* **Effort**：low ｜**排查價值**：⭐⭐⭐（本身無直接排查價值，純粹是 §P1 的解鎖前提）
+* **Effort**：~~low~~ → **trivial~low**（2026-08-23 實查下修，理由見痛點段的校正註記）｜**排查價值**：⭐⭐⭐（本身無直接排查價值，純粹是 §P1 的解鎖前提）
 
 ### §P12. 離線/斷網事件標記（Connectivity Marker）— 🆕 需新相依，謹慎評估
 

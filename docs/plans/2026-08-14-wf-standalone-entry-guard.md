@@ -35,7 +35,7 @@
 | `.claude/hooks/wf-guard-stage-check.sh` | 新增 | `PreToolUse` Hook 腳本，嚴格分支綁定與 responder 卡控 |
 | `.agents/hooks.json` | 修改 | 註冊 `wf-guard-stage-check` 於 Antigravity `PreToolUse` |
 | `.claude/settings.local.json` | 修改 | 註冊 `wf-guard-stage-check` 於 Claude `PreToolUse` |
-| `docs/brainstorm/2026-08-07-workflow-brainstorm.md` | 修改 | 更新 Gap 2.6 狀態為已修復與落地現況表格 |
+| `docs/brainstorm/2026-08-23-workflow-brainstorm.md` | 修改 | 更新 Gap 2.6 狀態為已修復與落地現況表格 |
 
 ---
 

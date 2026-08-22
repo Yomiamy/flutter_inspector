@@ -11,7 +11,7 @@
 
 `gen-dev-workflow` 是一個**全自動開發流程編排器**，從使用者說「幫我做 X 功能」到 PR 建立，共 6 個 stage（0a → 0b → 1 → 2 → 3 → 4），外加兩個獨立入口的 STAGE 5（回覆 PR review）與 STAGE 6（PR 合併後清理 worktree），以及小修正用的 **quick 模式**（單暫停點快速通道，不建 worktree）。核心機制是 **Claude 做總指揮 + `gemini-mcp-tool`（MCP）做委派執行**。自 STAGE 1 起，整條流程搬進一個獨立 worktree 執行——worktree 才是真正的隔離邊界。
 
-> **📌 委派後端的傳輸層變更（2026-08-10）**：後端一直是 antigravity-cli，但**傳輸層由 `agy -p` headless 改為 MCP 工具 `mcp__gemini-cli__ask-gemini`**。原因：`agy -p` 不吃 stdin、權限會卡死（見 [`brainstorm §2.3`](../brainstorm/2026-08-07-workflow-brainstorm.md)），委派實際一律落到 fallback，「委派」名存實亡。MCP 路徑經實測可寫檔、可改既有檔、可跑 shell 與 `git commit`，是同一後端唯一能真正委派的通道。
+> **📌 委派後端的傳輸層變更（2026-08-10）**：後端一直是 antigravity-cli，但**傳輸層由 `agy -p` headless 改為 MCP 工具 `mcp__gemini-cli__ask-gemini`**。原因：`agy -p` 不吃 stdin、權限會卡死（見 [`brainstorm §2.3`](../brainstorm/2026-08-23-workflow-brainstorm.md)），委派實際一律落到 fallback，「委派」名存實亡。MCP 路徑經實測可寫檔、可改既有檔、可跑 shell 與 `git commit`，是同一後端唯一能真正委派的通道。
 >
 > **MCP 路徑的三條紀律**（因 MCP 無法指定 cwd 而必要）：
 > 1. **工作目錄寫死在 prompt**——不寫絕對路徑，子進程可能在主 repo 而非 worktree 動手。
@@ -364,7 +364,7 @@ STAGE 1 之後的 state 檔存在**各自 worktree 內部**，不再是主 repo 
 | **STAGE 5/6 脫節** | 獨立入口與主流程不連貫 | 🟡 低 | STAGE 5、6 都是「獨立入口」。STAGE 5 串聯 responder → reviewer → publisher，邏輯與主流程部分重疊卻又獨立，若修改引入新 bug 沒有機制退回 STAGE 2；STAGE 6 雖已新增文件同步（gen-sync-docs-by-branchs → gen-commit）避免 docs 過期，但仍脫離主流程，靠使用者手動觸發、不自動偵測 PR 合併狀態，誤觸發（PR 未真正合併就清理）無自動防護，只靠使用者自律 |
 | **文件 vs 執行** | Skill 是文件，不是程式 | 🟡 中（原 🔴 高） | 可程式化的 guard 已從文件搬進 `scripts/wf-state.sh`：(1) state machine 實作——sequence 模式非法 stage 轉移直接 exit 1（合法路徑 0a→0b→1→2→3→4、3→2、4→done 寫死在轉移表；quick/jump 不套用轉移表，quick 升級走單向 `upgrade` 指令）；(2) 暫停點棘輪——`stage-done`/`task-done` 後未帶 `--confirmed` 的 `advance` 一律拒絕，跳過暫停點從「無聲遺忘」變成必須蓄意加旗標的可稽核動作；(3) `set` 白名單禁改 `stage`/確認旗標，防繞過。**殘餘風險**：LLM 仍可能根本不呼叫腳本（只能靠 SKILL.md 明文禁止手寫 JSON），context 用量估算依然無法程式化 |
 | **錯誤傳播** | 早期 stage 錯誤會放大 | 🟡 中 | 如果 STAGE 0a 的功能規格就有偏差，使用者確認了（可能沒仔細看），後面所有 stage 都在錯誤基礎上工作。flow 沒有後期發現早期問題的回溯機制 |
-| **STAGE 1 斷裂** | ~~`promote` 後 `stage-done 1` 恆遭拒（Bug 1.6）~~ | ✅ 已解決 | 2026-07-30 已透過修改 SKILL.md 工作流指示 (Workaround) 解決。正常 sequence 流程如今會依序執行 `advance 0b` 與 `advance 1`，強行推進 stage 來滿足 guard 的要求，而不去改動 `promote` 共用底層腳本。詳見 [`docs/brainstorm/2026-08-07-workflow-brainstorm.md`](../brainstorm/2026-08-07-workflow-brainstorm.md) §6。 |
+| **STAGE 1 斷裂** | ~~`promote` 後 `stage-done 1` 恆遭拒（Bug 1.6）~~ | ✅ 已解決 | 2026-07-30 已透過修改 SKILL.md 工作流指示 (Workaround) 解決。正常 sequence 流程如今會依序執行 `advance 0b` 與 `advance 1`，強行推進 stage 來滿足 guard 的要求，而不去改動 `promote` 共用底層腳本。詳見 [`docs/brainstorm/2026-08-23-workflow-brainstorm.md`](../brainstorm/2026-08-23-workflow-brainstorm.md) §6。 |
 | **狀態機漏洞** | ~~缺少任務完成與 STAGE 5 閉環校驗~~ | ✅ 已解決 | 2026-07-21 已在 `wf-state.sh` 補齊 `completed_tasks` 數量是否與 `total_tasks` 吻合的檢查，並於 STAGE 5 轉移表加上 `reviewer -> responder` 退回規則，防堵漏洞。（註：該校驗初版誤在頂層 `case` 分支用 `local`，一觸發即 `set -e` crash，已由「腳本脆弱性」列的 Bug 1.5 修正。） |
 | **腳本脆弱性** | ~~`wf-state.sh` 隱含多個 Bash Bug~~ | ✅ 已解決 | 2026-07-21 修復了 5 個 Bash 執行階段漏洞：參數不足導致 `shift 2` crash、無 `=` 的 `set` 參數致 JSON 損毀、負數被錯誤轉為字串、原子寫入失敗時殘留暫存檔，以及 `advance` 任務校驗誤用函式外 `local` 致 `set -e` crash（Bug 1.5，曾堵死 STAGE 2→3 主流程，屬「狀態機漏洞」修復引入的回歸）。 |
 | **垃圾回收缺失**| ~~廢棄 Pending 檔無人清理~~ | ✅ 已解決 | 2026-07-21 於 `wf-state.sh` 實作 `prune` 指令，可安全清理遺留超過 7 天的孤兒 `.pending-<wf-id>.json`。 |

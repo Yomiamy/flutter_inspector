@@ -1,6 +1,6 @@
 # 功能規格：鍵值儲存檢視器（Key-Value / SharedPreferences Browser）（§P15）
 
-> 來源：`docs/brainstorm/2026-08-22-features-brainstorm.md` §P15（L712–760）
+> 來源：`docs/brainstorm/2026-08-23-features-brainstorm.md` §P15（L712–760）
 > Effort（提案原估）: medium ｜ 排查價值：⭐⭐⭐⭐⭐
 > **驗收條件共 38 條**（rev.2 由 33 條擴充，見修訂紀錄）
 > **範圍已定案：完整讀寫**（列表 + 搜尋 + inline 編輯 + 刪除 + 清空），非唯讀版。

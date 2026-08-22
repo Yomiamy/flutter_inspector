@@ -1,7 +1,7 @@
 # 委派工作目錄強制：Guide → Sensor（§4）
 
 > 狀態：規格（STAGE 0a）｜日期：2026-08-19
-> 來源：`docs/brainstorm/2026-08-07-workflow-brainstorm.md` §4「把 Guide 升級成 Sensor（Böckeler）」、
+> 來源：`docs/brainstorm/2026-08-23-workflow-brainstorm.md` §4「把 Guide 升級成 Sensor（Böckeler）」、
 > `docs/architecture/2026-08-21-wf-state-harness-guardrail.md`「同構的第二個弱點：委派的工作目錄約束」
 
 ---
