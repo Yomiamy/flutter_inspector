@@ -1,6 +1,6 @@
 # 功能規格：Console 搜尋／過濾 + 點擊清過濾捲回主時間軸（§D1 + §P5）
 
-> 來源：`docs/brainstorm/2026-08-22-features-brainstorm.md` §D1（L268）+ §P5（L474）
+> 來源：`docs/brainstorm/2026-08-23-features-brainstorm.md` §D1（L268）+ §P5（L474）
 > Tier 3 · 檢索既有資訊 ｜ Effort: med ｜ 排查價值：⭐⭐⭐
 
 ## What：這個功能是什麼

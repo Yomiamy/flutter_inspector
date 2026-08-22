@@ -199,7 +199,7 @@ completed_tasks 的長度 < total_tasks  →  拒絕推進
 
 必須誠實標註：**上述所有 Guardrail 只在腳本被呼叫時才生效**。
 
-腳本擋得住「呼叫了 `advance` 但參數不合法」，擋不住「根本沒呼叫腳本就推進流程」。這正是 [`2026-08-07-workflow-brainstorm.md`](../brainstorm/2026-08-07-workflow-brainstorm.md) 記錄的 **Gap 2.6**——STAGE 5/6 這類獨立入口不在主鏈上，LLM 容易全程不碰 `wf-state.sh`，此時再多的內部校驗都無從觸發。
+腳本擋得住「呼叫了 `advance` 但參數不合法」，擋不住「根本沒呼叫腳本就推進流程」。這正是 [`2026-08-23-workflow-brainstorm.md`](../brainstorm/2026-08-23-workflow-brainstorm.md) 記錄的 **Gap 2.6**——STAGE 5/6 這類獨立入口不在主鏈上，LLM 容易全程不碰 `wf-state.sh`，此時再多的內部校驗都無從觸發。
 
 **對策必須落在入口攔截（hook 層），繼續往腳本內部堆校驗是無效的**。判讀本文件的防護強度時，請把「LLM 會記得呼叫腳本」視為尚未被程式碼保證的前提。
 
