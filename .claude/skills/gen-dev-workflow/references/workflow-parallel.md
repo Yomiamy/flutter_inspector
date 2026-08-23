@@ -33,12 +33,16 @@ planner 已在計畫中標好各任務的**寫入檔案 scope** 與**複雜度�
 // 驗收固定走 verifier agent + effort: 'xhigh'（frontmatter 只綁 model，effort 不隨實作任務浮動，需顯式帶）
 const results = await pipeline(
   batch,
-  task => agent(task.prompt, {label: task.id, model: task.model, effort: task.effort, isolation: 'worktree', schema: TASK_SCHEMA}),
+  task => agent(task.prompt, {label: task.id, agentType: 'implementer', model: task.model, effort: task.effort, isolation: 'worktree', schema: TASK_SCHEMA}),
   (impl, task) => agent(`驗收任務 ${task.id}：跑測試、檢查 diff`, {label: `verify:${task.id}`, agentType: 'verifier', effort: 'xhigh', schema: VERIFY_SCHEMA}),
 )
 // 回到主對話：聚合 results → 寫 state（completed_tasks）→ 在「每批完成」暫停點展示 → 問使用者確認下一批
 ```
 
+> ⚠️ **`agentType` 不可省略**：省略時 agent 不會套用該角色 `.claude/agents/*.md` 的 frontmatter（implementer 的 `model: sonnet`、verifier 的 `model: opus`），等於放棄角色綁定。`opts.model` 只覆寫 model，不會補上 agentType。
+>
+> ⚠️ **「快/便宜」是委派後端的內部等級，不是 Claude model 名**——`task.model` 帶的必須是 `sonnet`/`opus` 這類真實別名。計畫標「機械性」時對應 `model: 'sonnet'`，不要把「快/便宜」四個字直接傳進 `opts.model`。
+>
 > 邊界：**批與批之間的暫停由主指揮控制**，不可把多批塞進同一個 Workflow 連續跑完（那會跳過暫停點）。並行任務改檔時用 `isolation: 'worktree'` 避免互踩工作區。
 
 ## 適用點 3：STAGE 3 多 angle 對抗式審查
@@ -50,10 +54,10 @@ const LENSES = ['correctness', 'security', '回歸風險', '測試覆蓋']
 // 每個 lens 都是審查的一部分，effort 對齊 STAGE 3 的最強推論——不是任意選填。
 const findings = (await parallel([
   ...LENSES.map(lens => () =>
-    agent(`以 ${lens} 視角審查 <branch> 的 diff，盡力挑出真實問題`, {label: `review:${lens}`, effort: 'xhigh', schema: FINDING_SCHEMA})),
+    agent(`以 ${lens} 視角審查 <branch> 的 diff，盡力挑出真實問題`, {label: `review:${lens}`, agentType: 'verifier', effort: 'xhigh', schema: FINDING_SCHEMA})),
   // 第五 lens：找「不該存在的東西」。verifier 子進程看不到 ponytail hook，判準必須明文內嵌。
   () => agent(`以「過度工程/可簡化」視角審查 <branch> 的 diff 對照已確認的 plan：挑出計畫沒要求卻新增的抽象（單一實作的 interface、單一產品的 factory、永不變的 config、留給未來的 scaffolding、可用既有 helper/stdlib 取代的自製輪子）。每條 finding 必附刪除方案（刪哪些行、刪後 diff 是否更小、既有測試是否仍過）。絕不把信任邊界輸入驗證、防資料遺失、security、a11y 列為可簡化項。`,
-    {label: 'review:過度工程', effort: 'xhigh', schema: FINDING_SCHEMA}),
+    {label: 'review:過度工程', agentType: 'verifier', effort: 'xhigh', schema: FINDING_SCHEMA}),
 ])).filter(Boolean).flatMap(r => r.findings)
 // 回到主對話：reviewer 親自收斂 findings、去重、判定真偽 → 寫審查報告 → 暫停展示（不委派）
 ```
