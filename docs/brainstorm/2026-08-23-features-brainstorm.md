@@ -314,6 +314,23 @@
 * **Review 補正**：`TextEditingController` 原由 `_SearchBar` 私有持有，導致跳轉清掉 `_filter` 後輸入框仍殘留舊關鍵字；已將所有權提升至 `_ConsoleTabState` 並於跳轉時同步清空（附回歸測試）。
 * **測試**：`test/utils/console_utils_test.dart`（過濾語意）＋ `test/ui/tabs/console_tab_test.dart`（跳轉、正交疊加、long-press 書籤不被跳轉接管）。
 
+> **⚠️ 後續修正（2026-08-23 · PR #140）：本項落地時留下 chip 語意重疊，已移除 `Error` level chip。**
+>
+> 上述「`errorsOnly` 與 LogLevel 為互斥語意」解決的是**狀態**衝突（兩者不會同時生效），但沒解決**命名**衝突——`⚡ Errors only` 與 `Error` 兩個 chip 並排，名字讀起來是同一個 filter，實際行為卻不同：
+>
+> | | `⚡ Errors only` | `Error` chip |
+> |:---|:---|:---|
+> | warning log | ✅ 留 | ❌ 濾掉 |
+> | error log | ✅ 留 | ✅ 留 |
+> | **成功**的網路請求 | ❌ 濾掉 | ✅ **留** |
+> | 導航 / DB 事件 | ❌ 濾掉 | ✅ **留** |
+>
+> 差異源自 `_matchesLevel` 的正確設計：level 約束**只作用於 `LogEntry`**，非 log 一律放行——否則選一個 level chip 就會把網路/導航/DB 全部濾掉，讓 level filter 悄悄變成 source filter。這個設計沒錯，錯在讓它與 `Errors only` 並排且名字幾乎一樣，使用者無從分辨。
+>
+> **修正**：移除 `Error` level chip，`⚡ Errors only` 成為看失敗的唯一入口。`Warning` chip 保留——`Errors only` 的 warning 覆蓋與 error、失敗請求綁在一起，跟「只看 warning」不是同一件事。實作上把 chip 列的迴圈由 `LogLevel.values` 改走 `logLevelLabels.entries`，讓 label map 成為「有哪些 chip」的唯一真相來源（刪 entry 即刪 chip，迴圈內不需 `if`）。`ConsoleFilter.levels` 刻意保留 `Set<LogLevel>` 不收窄——model 層仍接受 `LogLevel.error`，只拿掉 UI 入口，收窄會在 `_matchesLevel` 多一個特殊情況。
+>
+> **這是一種新的「文件與實況不符」，不計入既有的漂移計數**：累計 7 次那個計數追蹤的是「標為待辦、實際已完成」（狀態欄漂移），本項不屬於該型態——§D1 的狀態欄是對的，它確實已完成。這裡漏記的是**已完成項目留下的缺陷**：實作現況寫得詳盡，卻沒人注意到新增的 chip 列本身引入了語意重疊。**教訓：實作現況該記的不只「做了什麼」，還有「做完後這塊 UI 長什麼樣、有沒有新的並排衝突」。**
+
 ### §D2. 未捕捉例外去重修復（#1 殘留缺陷）— ✅ 已完成（PR #96 · 2026-07-24）
 
 > 同一個 widget build 崩潰，`FlutterError.onError` 和 `ErrorWidget.builder` 各觸發一次 `_logFlutterError`，Console 出現兩筆完全相同的 error log，干擾判斷「是一次還是兩次」。
