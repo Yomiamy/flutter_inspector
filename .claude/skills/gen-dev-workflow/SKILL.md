@@ -81,8 +81,11 @@ description: |
     │  → 逐任務選 model：機械性→快/便宜｜整合→標準     │
     │     ｜設計判斷/跨層→最強                         │
     │  → 委派實作任務，verifier 兩階段驗收          │
+    │     （spec compliance → code quality，          │
+    │      見 delegation-and-parallel.md）            │
     │  🪶 Ponytail：派發模板必附〈規則塊〉，驗收把  │
     │     計畫外抽象/依賴/防禦分支當品質不佳退回    │
+    │     （規則塊全文見 .claude/agents/implementer.md）│
     │  ⏸ 每個任務（或每批並行）完成後暫停：            │
     │      展示變更檔案 + 測試結果摘要                  │
     │      問「確認繼續下一個任務嗎？」                  │

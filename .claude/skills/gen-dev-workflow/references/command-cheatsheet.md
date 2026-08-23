@@ -43,11 +43,13 @@
 | `繼續` ／ `繼續上次` | 接續本 session 或當前 branch 的未完成流程 |
 | `繼續批次` | `/clear` 後於新 session 接續批次的下一項 |
 | `停止批次` | 中止批次（只刪佇列檔，branch/PR/worktree 保留） |
-| `PR #<id> 合併了，清理 worktree` | STAGE 6：同步文件 → commit → 移除 worktree（branch 保留） |
+| `PR #<id> 合併了，清理 worktree` | STAGE 6：**先推進狀態**（見下方「狀態前置步驟」）→ 同步文件 → commit → 移除 worktree（branch 保留） |
 
 ## 跳入特定階段 (`mode: jump`)
 
 所有跳入指令都以 `mode: "jump"` 寫入狀態檔。每條呼叫都須依「推論等級表」明確帶 `effort` 參數。
+
+🔴 **每條跳入指令的第一步都是推進狀態，不可跳過。** 本表只列觸發語與動作；動手前先跑下方「狀態前置步驟」的對應指令，否則該次執行不會留在狀態機的軌跡上。
 
 | Command | Stage | Action |
 |---------|-------|--------|
@@ -59,3 +61,23 @@
 | `/gen-dev-workflow publish <branch>` | 4 | 建立 PR |
 | `/gen-dev-workflow review #<PR>` | 5 | 處理 PR review 意見 |
 | `/gen-dev-workflow cleanup <branch>` | 6 | PR 合併後清理 worktree（branch 保留）|
+
+### 狀態前置步驟（STAGE 5 / 6 獨立入口）
+
+兩種入口擇一，依當前工作區有無 state 檔決定：
+
+```bash
+# 既有工作區已存在 state 檔
+wf-state.sh advance <state_file> 5 --confirmed     # STAGE 5
+wf-state.sh advance <state_file> 6 --confirmed     # STAGE 6
+
+# 新對話／獨立進入（尚無 state 檔）
+wf-state.sh init --mode jump --stage 5 --branch <branch> --set pr=<PR>
+wf-state.sh init --mode jump --stage 6 --branch <branch>
+```
+
+跑完該 stage 的工作後**收尾也要記**：`wf-state.sh stage-done <檔> 5`（或 `6`）。
+
+> 🔴 **STAGE 6 沒有 hook 兜底，文件是唯一防線。**
+> `wf-guard-stage-check.sh` 只攔 `responder` agent 的派發（`PreToolUse` / `matcher: Agent`），所以 STAGE 5 漏跑前置步驟會被擋下。但 STAGE 6 全程在主對話呼叫 skill（`gen-sync-docs-by-branchs` → `gen-commit` → `worktree-close-cleanup`），**不派發任何 agent，hook 永遠不會觸發**。
+> 漏跑的後果不是報錯，是靜默：state 檔停在 `4`，`4→6` 這條合法轉移從未被記錄，稽核軌跡就此斷掉——而且直到 state 檔被刪都不會有人發現。
