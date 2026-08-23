@@ -7,13 +7,24 @@ import '../models/navigator_entry.dart';
 import '../models/network_entry.dart';
 import '../models/timestamped_entry.dart';
 
-/// Chip labels for each [LogLevel] shown in the Console tab.
+/// Chip labels for the [LogLevel]s that get their own Console tab chip.
+///
+/// [LogLevel.error] is deliberately absent: the `Errors only` shortcut already
+/// covers it, and an `Error` chip beside it read as the same filter while
+/// behaving differently (the chip keeps only error logs but lets every non-log
+/// entry through, the shortcut keeps warning/error logs plus failed network
+/// calls and drops everything else). Two chips for one intent is the
+/// confusion, so the narrower one is gone. Warning keeps a chip because the
+/// shortcut only ever surfaces warnings bundled with errors and failed calls,
+/// which is not the same as looking at warnings alone.
+///
+/// The Console tab renders one chip per entry here, so this map — not
+/// [LogLevel.values] — decides which levels are selectable.
 const Map<LogLevel, String> logLevelLabels = {
   LogLevel.verbose: 'Verbose',
   LogLevel.debug: 'Debug',
   LogLevel.info: 'Info',
   LogLevel.warning: 'Warning',
-  LogLevel.error: 'Error',
 };
 
 /// An immutable filter for the Console tab's merged timeline: a

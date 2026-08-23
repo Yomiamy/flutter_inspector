@@ -531,7 +531,7 @@ void main() {
         );
 
         await pumpTab(tester, inspector);
-        await tapChip(tester, 'Error');
+        await tapChip(tester, 'Warning');
 
         // The info log fails the level constraint...
         expect(find.text('an info log'), findsNothing);
@@ -573,6 +573,30 @@ void main() {
       expect(find.text('an info log'), findsNothing);
       expect(find.textContaining('https://api.test/ok'), findsNothing);
     });
+
+    testWidgets(
+      'there is no Error level chip, so Errors only is the single entry point '
+      'for looking at failures',
+      (tester) async {
+        final inspector = FlutterInspector(
+          navigatorKey: GlobalKey<NavigatorState>(),
+        );
+        inspector.log('a broken thing', level: LogLevel.error);
+
+        await pumpTab(tester, inspector);
+
+        // The neighbouring level chips are still there...
+        expect(find.widgetWithText(FilterChip, 'Warning'), findsOneWidget);
+        expect(find.widgetWithText(FilterChip, 'Info'), findsOneWidget);
+        // ...but the one that used to sit beside the shortcut and read as the
+        // same filter is gone.
+        expect(find.widgetWithText(FilterChip, 'Error'), findsNothing);
+        expect(
+          find.widgetWithText(FilterChip, '\u26a1 Errors only'),
+          findsOneWidget,
+        );
+      },
+    );
   });
 
   group('ConsoleTab jump back to the full timeline', () {
