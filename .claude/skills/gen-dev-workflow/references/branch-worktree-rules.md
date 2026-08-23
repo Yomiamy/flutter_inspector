@@ -36,7 +36,19 @@ STAGE 1 建立分支與工作區時，**不論從哪個入口進來**，最後�
    - 用**複製**不用 commit + cherry-pick：規劃文件在原 repo 尚未 commit，複製過去後在 worktree 中呼叫 `gen-commit` 將文件 commit，不需在 base branch 上多留一個 commit。
    - 複製後**驗證兩個檔案都存在於新 worktree**，缺任一個就停下回報，並於確認存在後執行 `gen-commit`，不要帶著未 commit 的狀態進 STAGE 2。
    - 路徑維持 repo 相對路徑不變（例 `docs/plans/2026-05-03-cart.md`），所以 state 檔的 `spec`/`plan` 欄位**不需改寫**，切目錄後自然指向新 worktree 內的同名檔。
-   - **原 repo 的那兩份等 commit 進 worktree 後才刪，別提早刪**：`cp` 完到 `gen-commit` 成功之間，原 repo 那份是唯一未銷毀的備份（worktree 建立失敗或使用者中途喊停時的後路），此窗口內刪除等於自斷退路。但 `gen-commit` 一旦成功，規劃文件已進 feature branch 的 git 歷史，原 repo 那份就成了無人追蹤的孤兒殘留——每跑一次 workflow 就多兩份，累積污染原 repo 的 `git status`。因此**驗證 worktree 內 commit 確實存在後（`git -C "<worktree-path>" log --oneline -1 -- "<spec 路徑>" "<plan 路徑>"` 有輸出），回原 repo 刪掉那兩份**：`rm -f "<repo-root>/<spec 路徑>" "<repo-root>/<plan 路徑>"`。commit 未確認成功前一律不刪。
+   - **原 repo 的那兩份等 commit 進 worktree 後才刪，別提早刪**：`cp` 完到 `gen-commit` 成功之間，原 repo 那份是唯一未銷毀的備份（worktree 建立失敗或使用者中途喊停時的後路），此窗口內刪除等於自斷退路。但 `gen-commit` 一旦成功，規劃文件已進 feature branch 的 git 歷史，原 repo 那份就成了無人追蹤的孤兒殘留——每跑一次 workflow 就多兩份，累積污染原 repo 的 `git status`。因此**逐檔驗證 worktree 的 `HEAD` 內確實有該檔後，才回原 repo 刪掉對應那一份**：
+
+     ```bash
+     # 逐檔查，不要一次傳兩個路徑——`git log -- A B` 只要其中一個有 commit 就會有輸出，
+     # 拿它當「兩個都進去了」的證據會在只 commit 到一個時刪掉另一個的最後副本。
+     for f in "<spec 路徑>" "<plan 路徑>"; do
+       git -C "<worktree-path>" cat-file -e "HEAD:$f" 2>/dev/null \
+         && rm -f "<repo-root>/$f" \
+         || echo "未進 HEAD，保留原檔：$f"
+     done
+     ```
+
+     用 `cat-file -e HEAD:<path>` 而非 `log`：前者問的是「這個路徑此刻在 HEAD 這棵樹裡嗎」，後者問的是「這些路徑有沒有任何一個產生過 commit」——只有前者能逐檔回答。commit 未確認成功前一律不刪。
    - issue-id 路徑（跳過 STAGE 0a/0b）沒有這兩份文件，本步驟略過。
 6. **主對話切換工作目錄**：後續 STAGE 2–4 的所有 Bash 指令與檔案操作都在新 worktree 路徑下執行，state 檔（見 `references/state-machine.md`）也寫在新 worktree 內的 `.claude/workflow-state/`，與主 repo 分開、互不干擾。
 

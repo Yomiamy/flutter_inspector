@@ -64,7 +64,10 @@ wf-state.sh batch-init "§P4..." "§P6..." "#42" --pause-level balanced
   ▼
 wf-state.sh batch-next → 取得第 1 項
   ▼
-跑完整 sequence 流程（0a→4）：各自 issue / worktree / branch / PR
+依該項的類型決定起始 stage（各自 issue / worktree / branch / PR）
+  ├─ 描述項（如 "§P4 ..."）      → 跑 0a→4，需產規格與計畫
+  ├─ #issue 項（如 "#42"）       → 跳過 0a/0b，從 STAGE 1 起跑
+  │                                （規格已在 issue 內，重跑會重複規劃甚至重開 Issue）
   ├─ 用批次檔記的 pause_level 建該項的 state 檔
   └─ cd 進該項的 worktree 執行
   ▼
@@ -93,7 +96,7 @@ batch-next 回傳 DONE → 輸出總結（各項 status / PR 連結），刪除�
 
 **「繼續批次」的定位流程**（新 session 進來時）：
 
-```
+```text
 → .claude/workflow-state/.batch-*.json
    ├─ 0 個 → 告知「找不到進行中的批次」，不自行猜測
    ├─ 1 個 → 讀取，batch-next 取下一項，繼續

@@ -4,10 +4,10 @@
 
 | Context 用量 | 行為 |
 |---|---|
-| < 60k | 正常流程，不做任何事 |
-| 60–100k | ⚠️ 提示使用者「context 已 <用量>，建議精簡」。委派 agent 時要求只回報摘要，不回貼完整 diff / 檔案內容 |
-| 100–150k | ⚠️ 完整流程且 MCP 可用時：implementer / publisher 強制走 MCP 委派（不自行讀大檔），主對話只保留高層判斷。**MCP 不可用時走 Fallback 或按下方 `> 150k` 規則切 session，不得因此卡住等待 MCP 恢復**。Quick 模式本無 implementer 委派，此行不適用於其直接實作步驟 |
-| > 150k | ⛔ **強制 checkpoint，主動切 session** — 走下方「context 超標切 session 閉環」 |
+| context < 60k | 正常流程，不做任何事 |
+| 60k ≤ context < 100k | ⚠️ 提示使用者「context 已 <用量>，建議精簡」。委派 agent 時要求只回報摘要，不回貼完整 diff / 檔案內容 |
+| 100k ≤ context ≤ 150k | ⚠️ 完整流程且 MCP 可用時：implementer / publisher 強制走 MCP 委派（不自行讀大檔），主對話只保留高層判斷。**MCP 不可用時走 Fallback 或按下方 `> 150k` 規則切 session，不得因此卡住等待 MCP 恢復**。Quick 模式本無 implementer 委派，此行不適用於其直接實作步驟 |
+| context > 150k | ⛔ **強制 checkpoint，主動切 session** — 走下方「context 超標切 session 閉環」 |
 
 ## context 超標切 session 閉環
 
@@ -15,7 +15,7 @@
 
 `> 150k` 觸發時，**不是只丟一句「建議切 session」**，而是執行完整交接：
 
-```
+```text
 1. 完成當前正在進行的最小單元（如 STAGE 2 的當前任務），不要切在半途
 2. 寫入本 workflow 的 state 檔：`wf-state.sh set <檔> interrupted_by=context_budget`
    ├─ 已建 branch → <branch-slug>.json（記錄 stage / mode / spec / plan / branch / completed_tasks）
@@ -32,7 +32,7 @@
 > **批次模式下的 Token Gate**：批次的每一項本來就靠使用者 `/clear` 換全新 context，所以正常情況不該在單項內撞到 150k。若真的撞到（單項過大），照上述閉環處理**該項自己的 state 檔**即可——批次檔不動、游標不前進，使用者續接後會接回同一項的 STAGE N，而不是跳到下一項。**絕不因為 context 超標就 `batch-done`**，那會把做到一半的項目標記成完成。
 
 續接時（新 session 讀到 `"interrupted_by": "context_budget"`）：
-```
+```text
 → 定位本 workflow 的 state 檔（已建 branch 靠當前 branch；尚無 branch 靠使用者帶回的 <wf-id>，
    或在只有單一 pending 檔時直接認領）
 → 開場白改為：「[<wf-id 或 branch-slug>] 偵測到上次因 context 超標而保存（STAGE <N>），現在 context 乾淨，直接續接。」

@@ -1,14 +1,21 @@
 # 執行方式與跳入階段指令 (Command Cheatsheet)
 
 ## 啟動完整流程
-```
+```text
 使用者：幫我做 <需求描述>
 
 你：好，開始執行開發流程。（effort 依「推論等級表」明確帶入，`xhigh` 的 400 風險註記見 `references/delegation-and-parallel.md`）
-    Task("planner", "規劃 <需求描述>，產出 plan 文件", effort: "xhigh")
-    → [等 planner 完成] → 展示計畫摘要 → 暫停確認
+    # STAGE 0a：功能規格（What & Why）
+    Task("planner", "為 <需求描述> 撰寫功能規格", effort: "xhigh")
+    → 產出 docs/features/YYYY-MM-DD-<feature>.md → 展示 → ⏸ 暫停確認
+    # STAGE 0b：實作計畫（How）——兩階段不可合併，0a 未確認不得進 0b
+    → Task("planner", "依已確認的規格產出實作計畫", effort: "xhigh")
+    → 產出 docs/plans/YYYY-MM-DD-<feature>.md → 展示 → ⏸ 暫停確認
+    # STAGE 1：先展示命名，確認後才建立
     → Skill("gen-gh-issue") 依計畫產出 Issue body（五區段 zh-tw）
-    → Task("brancher", "用上述 Issue body 執行 <plan 路徑>", effort: "high")
+    → Task("brancher", "產出分支/worktree 名稱草稿，先不要建立", effort: "high")
+    → 展示 Issue 標題/內容 + 分支/worktree 名稱 → ⏸ 暫停確認
+    → 確認後才執行 gh issue create 與 worktree/branch 建立
     → Task("implementer", "執行 <plan 路徑>", effort: "max")
     → Task("reviewer", "審查 <branch-name>", effort: "xhigh")
     → [若不通過] Task("implementer", "修正以下問題：<reviewer 回報>", effort: "max")
@@ -17,14 +24,14 @@
 ```
 
 ## 從既有 issue id 啟動（跳過 STAGE 0a/0b）
-```
+```text
 使用者：開發 issue #54
 
 你：好，直接進 STAGE 1。（effort 依「推論等級表」明確帶入）
     Task("brancher", "解析 issue #54 內容為實作 brief，依 ticket-id-dev-prep 規則
-                       決定 prefix/slug，建立 worktree + branch", effort: "high")
-    → [等 brancher 完成] → 展示解析後的 brief + branch/worktree 名稱 → 暫停確認
-    → cd 進新 worktree
+                       決定 prefix/slug，先只產出名稱草稿不要建立", effort: "high")
+    → [等 brancher 完成] → 展示解析後的 brief + branch/worktree 名稱 → ⏸ 暫停確認
+    → 確認後才建立 worktree + branch → cd 進新 worktree
     → Task("implementer", "依 issue brief 執行實作", effort: "max")
     → Task("reviewer", "審查 <branch-name>", effort: "xhigh")
     → [若不通過] Task("implementer", "修正以下問題：<reviewer 回報>", effort: "max")
@@ -74,7 +81,7 @@ wf-state.sh advance <state_file> 6 --confirmed     # STAGE 6
 # 新對話／獨立進入（尚無 state 檔）
 wf-state.sh init --mode jump --stage 5 --branch <branch> --set pr=<PR>
 wf-state.sh init --mode jump --stage 6 --branch <branch>
-```
+```text
 
 跑完該 stage 的工作後**收尾也要記**：`wf-state.sh stage-done <檔> 5`（或 `6`）。
 

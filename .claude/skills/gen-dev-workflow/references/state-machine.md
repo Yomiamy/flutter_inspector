@@ -5,7 +5,7 @@
 
 每個 stage 開始前，輸出一行進度提示。**前綴帶流程識別**（pending 階段帶 `<wf-id>`，已建 branch 後帶 branch slug），讓多個並行 workflow 的輸出能一眼分辨：
 
-```
+```text
 [wf-1717400000-3f9a] [0a/5] 撰寫功能規格中...   ← 尚無 worktree，帶 wf-id
 [feature-202605-42-cart] [1/5] 建立 Issue + Worktree 中...  ← 已建 worktree，帶 slug
 [feature-202605-42-cart] [2/5] 實作中（共 N 個任務）...
@@ -50,7 +50,7 @@ state 檔的**所有**建立、讀取、更新一律透過本 skill 的 `scripts
 
 **檔案路徑規則：**
 
-```
+```text
 <worktree-path>/.claude/workflow-state/<branch-slug>.json   ← 已建 worktree 的 workflow（STAGE 1 之後，存於新 worktree 內）
 .claude/workflow-state/.pending-<wf-id>.json                ← 尚無 worktree 時的暫存（STAGE 0a / 0b，存於原 repo）
 ```
@@ -75,18 +75,19 @@ state 檔的**所有**建立、讀取、更新一律透過本 skill 的 `scripts
   "branch": null,
   "spec": null,
   "plan": null,
+  "completed_tasks": [],
   "awaiting_confirmation": false
 }
-```
+```text
 
 進度回報行格式（每次 stage 切換、每個任務完成時輸出）：
-```
+```text
 [wf-1717400000-3f9a] [1/5] 建立 Issue + Worktree 中...
-```
+```text
 worktree 建立後改帶 branch slug，不再需要 workflow-id：
-```
+```text
 [feature-202605-42-cart] [2/5] 實作中（共 5 個任務）...
-```
+```text
 
 **state 檔生命週期（解決「尚無 worktree」這個唯一邊界）：**
 
@@ -118,7 +119,7 @@ worktree 建立後改帶 branch slug，不再需要 workflow-id：
   "interrupted_by": "context_budget",
   "awaiting_confirmation": false
 }
-```
+```text
 
 `interrupted_by` 欄位（可選）：記錄上次為何中斷，續接時用來決定第一句話。
 - `"context_budget"` → 因 context 超標主動切 session（見 [`token-budget-gate.md`](token-budget-gate.md)）
@@ -140,7 +141,7 @@ worktree 建立後改帶 branch slug，不再需要 workflow-id：
   "total_tasks": null,
   "awaiting_confirmation": false
 }
-```
+```text
 
 `mode` 的用途：
 - `sequence` → 前面所有 stage 都有完整 context（spec、plan、branch），可以回頭參照
@@ -158,7 +159,7 @@ worktree 建立後改帶 branch slug，不再需要 workflow-id：
 | C | 「繼續」/ 「繼續上次」/ 「繼續開發」 |
 
 **先定位「本 session 對應的 state 檔」（A / B / C 共用）：**
-```
+```text
 → 若本 session context 已持有 <wf-id>（這個流程在本 session 啟動過 STAGE 0a/0b）
    → 直接認領 .pending-<wf-id>.json，走「狀態檔存在時」（不必看 branch）
 
@@ -177,28 +178,31 @@ worktree 建立後改帶 branch slug，不再需要 workflow-id：
    │   └─ ≥2 個 → 列出全部讓使用者選，或開新流程
    └─（並行情境下，每個 session 都待在自己的 branch，候選檔通常一擊命中；
        多個流程同時卡在 STAGE 0a/0b 時，靠各自 context 的 <wf-id> 一擊命中，不會誤撿別人的 pending 檔）
-```
+```text
 
 > **絕不**用 `git branch --show-current` 推導去認領 pending 檔——pending 階段可能多個流程共用同一 base branch，branch 推不出唯一的 pending 檔。pending 階段的唯一識別永遠是 `<wf-id>`。
 
 > **🔴 定位期間，其他 state 檔唯讀。** 上面「列出其他流程讓使用者選」的分支裡，你對那些檔案的權限**只有列名**——不查它們的 PR 狀態、不讀內容做判斷、更不刪除。它們要等使用者**明確說「接續它」**才成為本 session 認領的檔。使用者若選擇「開新流程」，那些檔案維持原狀，**不因為你路過而被清理**（見下方「本 session 的 state 檔以外，一律不碰」）。
 
 **狀態檔存在時（即上面定位到的 `<slug>.json`）：**
-```
+```text
 → wf-state.sh get <檔>（讀取即校驗；校驗失敗 → 告知使用者 state 已腐壞，不靜默續接）
 → 若 pr 欄位有值 → gh pr view <pr> --json state --jq '.state'
-   ├─ MERGED → 自動刪除該檔，告知「PR 已合併，開發週期完成 ✦」
+   ├─ MERGED → **先問是否要跑 STAGE 6**（同步文件 → commit → 清 worktree）。
+   │            要跑 → 保留 state 檔，`advance <檔> 6 --confirmed` 進 STAGE 6，
+   │                   待 `stage-done 6` 收尾後才刪。
+   │            不跑 → 才刪檔，告知「PR 已合併，開發週期完成 ✦」
    ├─ CLOSED → 問使用者「PR 已關閉，要重新開 PR 還是放棄？」
    └─ OPEN   → 展示目前狀態（STAGE <N>），問「繼續還是開新流程？」
 → 若 pr 欄位為 null → 展示目前狀態（STAGE <N>），問「繼續還是開新流程？」
-```
+```text
 
 **狀態檔不存在時：**
-```
+```text
 → 觸發 A → 問「要開始新的開發流程嗎？請描述需求」
 → 觸發 B → 直接用使用者描述的需求啟動新流程
 → 觸發 C → 告知「當前 branch 找不到未完成的流程，要開始新的嗎？」
-```
+```text
 
 ## 🔴 本 session 的 state 檔以外，一律不碰
 
@@ -219,7 +223,8 @@ worktree 建立後改帶 branch slug，不再需要 workflow-id：
 
 | 條件 | 動作 |
 |------|------|
-| **本 session 的** state 檔，其 PR 狀態為 `MERGED` | 自動刪除**該檔** |
+| **本 session 的** state 檔，其 PR 狀態為 `MERGED`，且 STAGE 6 已完成或使用者明確不跑 | 刪除**該檔** |
+| 本 session 的 state 檔，PR 已 `MERGED` 但 STAGE 6 尚未跑 | **保留**——STAGE 6 要用它推 `4→6`；先刪會讓該轉移無從記錄，且逼使用者重新 `init --mode jump` |
 | 使用者說「放棄這個功能」（指本 session 正在跑的流程） | 自動刪除**該檔** |
 | 其他情況 | 一律保留，直到明確完成 |
 | **不是本 session 認領到的檔** | **一律不動**——即使它的 PR 已 MERGED、即使它看起來是殘留物 |

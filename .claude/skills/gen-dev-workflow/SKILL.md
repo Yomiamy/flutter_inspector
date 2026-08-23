@@ -172,7 +172,7 @@ description: |
 
 上表是 `strict`（預設）的行為。使用者可在啟動時加參數調整（如 `--pause-level balanced`）。
 
-**`pause_level` 與 mode 正交**——mode（`sequence` / `quick` / `batch`）決定「有哪些階段」，`pause_level` 決定「這些階段跑完要不要問使用者」。兩者獨立設定，互不取代：
+**`pause_level` 與 mode 正交**——mode（`sequence` / `quick` / `jump`，即 state 檔的 `mode` 欄位；`batch` 是佇列類型不是 mode，批次的每一項各自跑 `sequence`）決定「有哪些階段」，`pause_level` 決定「這些階段跑完要不要問使用者」。兩者獨立設定，互不取代：
 
 | level | Stage 關卡 | STAGE 2 任務間 | 適用 |
 |:---|:---|:---|:---|
