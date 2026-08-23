@@ -3,9 +3,9 @@
 > 本檔是 `gen-dev-workflow` 主 skill 的並行加速層參考。主檔（`../SKILL.md`）在使用者 opt-in 多 agent 編排時指向這裡。
 > 未 opt-in 時完全用不到本檔——三處適用點一律退回主檔原本的 `Task(...)` / 序列作法，功能相同，只是不 fan-out。
 
-**僅在使用者已 opt-in 多 agent 編排時啟用**（見主檔開頭「Claude Workflow 編排」總則）。未 opt-in → 三處全部退回原本的 `Task(...)` / 序列作法。
+**僅在使用者已 opt-in 多 agent 編排時啟用**（見主檔 [`../SKILL.md`](../SKILL.md) 的「Claude Workflow 編排（可選加速層）」章節）。未 opt-in → 三處全部退回原本的 `Task(...)` / 序列作法。
 
-共通鐵則（與主檔「並行三規則」一致，違反即退回序列）：
+共通鐵則（與 [`delegation-and-parallel.md`](delegation-and-parallel.md) 的「並行三規則」一致，違反即退回序列）：
 - 一個 `Workflow` 呼叫 = **一段不可中斷的 fan-out**，跑完才回到主對話。**暫停點永遠在 Workflow 呼叫之外**，由主指揮掌控。
 - Workflow 回傳結構化結果後，主指揮負責**聚合、套用 model 策略、寫 state 檔、在既有暫停點展示**。Workflow 內部不碰 state 檔、不問使用者。
 - 用 `pipeline()` 為預設；只有「下一步需要前一步全部結果」時才用 `parallel()` barrier。
@@ -29,7 +29,7 @@ const [projCtx, similarCode] = await parallel([
 planner 已在計畫中標好各任務的**寫入檔案 scope** 與**複雜度等級**。同一批內「寫入路徑不重疊」的任務 → `pipeline()` 並行，**每個任務沿用原本的逐任務 model 分級**（`opts.model` 帶入計畫標註的等級）；**effort 需另外依推論等級表帶入**（`opts.model` 只管 model，不會連帶設定 effort）。
 
 ```js
-// batch = 當前批次中路徑不重疊的任務；model/effort 來自計畫的複雜度標註（等級 → 綁定見主檔「推論等級表」）
+// batch = 當前批次中路徑不重疊的任務；model/effort 來自計畫的複雜度標註（等級 → 綁定見 delegation-and-parallel.md 的「推論等級表」）
 // 驗收固定走 verifier agent + effort: 'xhigh'（frontmatter 只綁 model，effort 不隨實作任務浮動，需顯式帶）
 const results = await pipeline(
   batch,

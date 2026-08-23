@@ -33,7 +33,7 @@ state 檔的**所有**建立、讀取、更新一律透過本 skill 的 `scripts
 | 使用者確認（stage 不變，如 STAGE 2 任務間） | `wf-state.sh confirm <檔>` |
 | 使用者確認並推進 stage | `wf-state.sh advance <檔> <next> --confirmed` |
 | quick 升級完整流程 | `wf-state.sh upgrade <檔> [--confirmed]`（單向 quick→sequence，stage 落在 2；有暫停點等待確認時須帶 `--confirmed`） |
-| 設定暫停粒度 | `wf-state.sh init --pause-level strict\|balanced\|autonomous`，或中途 `wf-state.sh set <檔> pause_level=<L>`（見主檔「暫停粒度」章節） |
+| 設定暫停粒度 | `wf-state.sh init --pause-level strict\|balanced\|autonomous`，或中途 `wf-state.sh set <檔> pause_level=<L>`（見主檔 [`../SKILL.md`](../SKILL.md) 的「暫停粒度」章節） |
 | 建立批次佇列 | `wf-state.sh batch-init <項目> ... [--pause-level <L>]` → 回傳批次檔路徑 |
 | 取批次下一項 | `wf-state.sh batch-next [<檔>]`（全跑完回傳 `DONE`；省略檔名自動定位唯一批次） |
 | 批次項目完成 / 失敗 | `wf-state.sh batch-done [<檔>] [--pr <url>] [--branch <b>]` ／ `batch-fail [<檔>] [--note <s>]` |
@@ -121,7 +121,7 @@ worktree 建立後改帶 branch slug，不再需要 workflow-id：
 ```
 
 `interrupted_by` 欄位（可選）：記錄上次為何中斷，續接時用來決定第一句話。
-- `"context_budget"` → 因 context 超標主動切 session（見主檔 Token Budget Gate）
+- `"context_budget"` → 因 context 超標主動切 session（見 [`token-budget-gate.md`](token-budget-gate.md)）
 - `null` 或不存在 → 正常暫停（使用者主動離開）
 
 **jump 模式**（直接指定特定 stage 執行）：
@@ -145,7 +145,7 @@ worktree 建立後改帶 branch slug，不再需要 workflow-id：
 `mode` 的用途：
 - `sequence` → 前面所有 stage 都有完整 context（spec、plan、branch），可以回頭參照
 - `jump` → 只有當前 stage 的資訊，不應假設前面的 context 存在
-- `quick` → 快速通道，只有 branch 與（可選）issue，無 spec/plan/worktree（見主檔「Quick 模式」章節）
+- `quick` → 快速通道，只有 branch 與（可選）issue，無 spec/plan/worktree（見 [`execution-modes.md`](execution-modes.md) 的「Quick 模式」章節）
 
 **狀態檔檢查時機（三種觸發）：**
 
