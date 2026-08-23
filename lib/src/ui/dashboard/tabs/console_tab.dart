@@ -201,12 +201,12 @@ class _ConsoleTabState extends State<ConsoleTab> {
                       selected: _filter.errorsOnly,
                       onSelected: (_) => _toggleErrorsOnly(),
                     ),
-                    for (final level in LogLevel.values) ...[
+                    for (final entry in logLevelLabels.entries) ...[
                       const SizedBox(width: ThemeSize.space8),
                       FilterChip(
-                        label: Text(logLevelLabels[level] ?? ''),
-                        selected: _filter.levels.contains(level),
-                        onSelected: (_) => _toggleLevel(level),
+                        label: Text(entry.value),
+                        selected: _filter.levels.contains(entry.key),
+                        onSelected: (_) => _toggleLevel(entry.key),
                       ),
                     ],
                     const SizedBox(width: ThemeSize.space8),
