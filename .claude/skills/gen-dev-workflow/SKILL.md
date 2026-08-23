@@ -159,11 +159,17 @@ description: |
 | 遇到模糊需求 | 問最小必要問題（≤ 2 個），不要問多 | 使用者回答後自動繼續 |
 | PR 草稿完成後 | 展示草稿，問「確認發布嗎？」 | 使用者確認 |
 
-**不應該暫停的情況：** 分支建立、任務間自動切換、STAGE 2 內部失敗 retry、STAGE 3 審查失敗退回 STAGE 2、測試執行、並行單元間的協調。這些全部自動處理。
+**不應該暫停的情況：** 分支建立、任務間自動切換、STAGE 2 內部失敗 retry、STAGE 3 審查失敗退回 STAGE 2、測試執行、並行單元間的協調。這些全部自動處理（失敗 retry 與退回路徑見 [`references/delegation-and-parallel.md`](references/delegation-and-parallel.md)）。
+
+**主動中斷（非暫停）：** context > 150k 時依 Token Budget Gate 主動保存並切 session，這**不是暫停點，是保護性中斷**——續接時不問「繼續還是開新流程」，直接接回原 stage（見 [`references/token-budget-gate.md`](references/token-budget-gate.md)）。
+
+**暫停點的程式強制（棘輪）：** 每個暫停點對應一次 `wf-state.sh stage-done`（或 STAGE 2 的 `task-done`），把 state 標為等待確認；使用者確認後才跑 `advance <next> --confirmed`（或任務間的 `confirm`）推進。未確認就 `advance` 會被腳本直接拒絕——**暫停點不靠本文件的自律，靠腳本擋**。
 
 ### 暫停粒度（`pause_level`）
 
-上表是 `strict`（預設）的行為。使用者可在啟動時加參數調整（如 `--pause-level balanced`）：
+上表是 `strict`（預設）的行為。使用者可在啟動時加參數調整（如 `--pause-level balanced`）。
+
+**`pause_level` 與 mode 正交**——mode（`sequence` / `quick` / `batch`）決定「有哪些階段」，`pause_level` 決定「這些階段跑完要不要問使用者」。兩者獨立設定，互不取代：
 
 | level | Stage 關卡 | STAGE 2 任務間 | 適用 |
 |:---|:---|:---|:---|
@@ -171,8 +177,21 @@ description: |
 | `balanced` | 只停 `0b` 計畫確認 / `2` 實作整體完成 / `4` PR 發布前 | **不停** | 計畫已看過，想一路跑到 PR |
 | `autonomous` | 全不停 | 不停 | 批次佇列、純機械性改動 |
 
+**等價的自然語言**（使用者不打選項時，下列說法一律解析為對應 level）：
+
+| 使用者說 | 解析為 |
+|---|---|
+| 「中途不要問我」「不要停」「一路跑完」 | `balanced` |
+| 「完全不要問」「全自動」「無人值守」 | `autonomous`（⚠️ 須先警示，見下） |
+| 「每步都讓我確認」「盯緊一點」 | `strict` |
+
+**流程中途改變粒度**：使用者說「接下來不要再問了」→ `wf-state.sh set <檔> pause_level=balanced`，即刻生效於後續暫停點，不需重啟流程。
+
 **判定的唯一來源是腳本的 `should_pause()`**：照常在每個暫停點呼叫 `stage-done` / `task-done`，看它回傳「等待使用者確認」就停下，回傳「自動推進」就直接繼續。`pause_level` 僅關掉詢問，不關掉狀態機校驗與防禦（異常值一律退回 strict）。
-⚠️ `autonomous` 會讓 PR 不經過目直接送出，除非明確要求，否則優先建議 `balanced`。
+
+⚠️ `autonomous` 會讓 `gh pr create` 不經過目直接執行，**選它前必須先警示一次並取得明確同意**——這是唯一在設定階段就要確認的 level，因為它關掉的是對外動作的最後一道關卡。除非使用者明確要求無人值守，否則優先建議 `balanced`。
+
+⚠️ `quick` + `balanced` 無作用（腳本短路回 `strict`），詳見 [`references/execution-modes.md`](references/execution-modes.md)。
 
 ---
 
