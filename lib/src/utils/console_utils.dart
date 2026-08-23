@@ -11,11 +11,12 @@ import '../models/timestamped_entry.dart';
 ///
 /// [LogLevel.error] is deliberately absent: the `Errors only` shortcut already
 /// covers it, and an `Error` chip beside it read as the same filter while
-/// behaving differently (the chip lets every non-log entry through, the
-/// shortcut keeps only failures). Two chips for one intent is the confusion,
-/// so the narrower one is gone. Warning keeps a chip because the shortcut's
-/// warning coverage comes bundled with errors and failed calls, which is not
-/// the same as looking at warnings alone.
+/// behaving differently (the chip keeps only error logs but lets every non-log
+/// entry through, the shortcut keeps warning/error logs plus failed network
+/// calls and drops everything else). Two chips for one intent is the
+/// confusion, so the narrower one is gone. Warning keeps a chip because the
+/// shortcut only ever surfaces warnings bundled with errors and failed calls,
+/// which is not the same as looking at warnings alone.
 ///
 /// The Console tab renders one chip per entry here, so this map — not
 /// [LogLevel.values] — decides which levels are selectable.
