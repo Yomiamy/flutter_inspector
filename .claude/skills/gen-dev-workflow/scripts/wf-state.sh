@@ -332,7 +332,7 @@ case "$cmd" in
       die "stage $cur 等待使用者確認中。先在對話中暫停詢問，獲確認後帶 --confirmed 重跑"
     fi
     if [ "$mode" = "sequence" ] && ! legal_transition "$cur" "$next"; then
-      die "非法 stage 轉移：$cur -> ${next}（sequence 模式合法路徑：0a→0b→1→2→3→4、3→2、4→done）"
+      die "非法 stage 轉移：$cur -> ${next}（sequence 模式合法路徑：0a→0b→1→2→3→4、3→2、4→done，以及獨立入口 4→5、5→4、5→5、4→6、5→6、6→done）"
     fi
     if [ "$next" = "3" ] && [ "$mode" = "sequence" ]; then
       total="$(jq -r '.total_tasks' "$f")"

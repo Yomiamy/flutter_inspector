@@ -39,16 +39,23 @@ STAGE 1 建立分支與工作區時，**不論從哪個入口進來**，最後�
    - **原 repo 的那兩份等 commit 進 worktree 後才刪，別提早刪**：`cp` 完到 `gen-commit` 成功之間，原 repo 那份是唯一未銷毀的備份（worktree 建立失敗或使用者中途喊停時的後路），此窗口內刪除等於自斷退路。但 `gen-commit` 一旦成功，規劃文件已進 feature branch 的 git 歷史，原 repo 那份就成了無人追蹤的孤兒殘留——每跑一次 workflow 就多兩份，累積污染原 repo 的 `git status`。因此**逐檔驗證 worktree 的 `HEAD` 內確實有該檔後，才回原 repo 刪掉對應那一份**：
 
      ```bash
-     # 逐檔查，不要一次傳兩個路徑——`git log -- A B` 只要其中一個有 commit 就會有輸出，
-     # 拿它當「兩個都進去了」的證據會在只 commit 到一個時刪掉另一個的最後副本。
+     # 逐檔比對「內容」，不是查「路徑在不在」：
+     #   - `git log -- A B` 只要其中一個有 commit 就有輸出 → 會在只 commit 到一個時刪掉另一個的最後副本
+     #   - `cat-file -e HEAD:<path>` 只證明該路徑存在於 HEAD → 若 base 早就有同名檔、或 HEAD 存的是舊版，
+     #     檢查照樣通過，於是刪掉原 repo 裡那份「才是本次正確內容」的檔
+     # 唯一safe 的判準是 blob hash 相同：worktree 的 HEAD 裡存的，就是我要刪的這份。
      for f in "<spec 路徑>" "<plan 路徑>"; do
-       git -C "<worktree-path>" cat-file -e "HEAD:$f" 2>/dev/null \
-         && rm -f "<repo-root>/$f" \
-         || echo "未進 HEAD，保留原檔：$f"
+       src="$(git hash-object "<repo-root>/$f")" || { echo "讀不到原檔，跳過：$f"; continue; }
+       dst="$(git -C "<worktree-path>" rev-parse "HEAD:$f" 2>/dev/null)" || { echo "未進 HEAD，保留原檔：$f"; continue; }
+       if [ "$src" = "$dst" ]; then
+         rm -f "<repo-root>/$f"
+       else
+         echo "HEAD 內容與原檔不符（可能是 base 的舊版本），保留原檔：$f"
+       fi
      done
      ```
 
-     用 `cat-file -e HEAD:<path>` 而非 `log`：前者問的是「這個路徑此刻在 HEAD 這棵樹裡嗎」，後者問的是「這些路徑有沒有任何一個產生過 commit」——只有前者能逐檔回答。commit 未確認成功前一律不刪。
+     `git hash-object` 算原檔的 blob hash，`rev-parse HEAD:<path>` 取 HEAD 樹中該路徑的 blob hash——兩者相同才證明「worktree 已 commit 的正是這一份」。內容未比對相符前一律不刪。
    - issue-id 路徑（跳過 STAGE 0a/0b）沒有這兩份文件，本步驟略過。
 6. **主對話切換工作目錄**：後續 STAGE 2–4 的所有 Bash 指令與檔案操作都在新 worktree 路徑下執行，state 檔（見 `references/state-machine.md`）也寫在新 worktree 內的 `.claude/workflow-state/`，與主 repo 分開、互不干擾。
 
