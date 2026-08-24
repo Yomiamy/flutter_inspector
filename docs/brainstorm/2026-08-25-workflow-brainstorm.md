@@ -1794,3 +1794,118 @@ Spec Kit、Kiro Specs、Agent OS、Vibe Kanban、Claude Squad、Stately Agent (X
 > 如果是 Guide，它大概率會被忽略，那就不值得加。**
 
 ---
+
+## 🟠 第四部分：SKILL.md 拆分後的待辦（2026-08-25 · 由 Issue #142 整併）
+
+> **背景**：`SKILL.md` 從 1017 行拆為 209 行主檔 + 8 份 `references/`（PR #141）。
+> 拆分本體與四類斷裂（交叉指涉／歸屬錯置／語意遺失／速查漏步驟）已完成，
+> 拆分殘留四項（STAGE 5 攔截後果、STAGE 6 同步範圍、batch `--pause-level`、
+> context 區間寫法）亦已修（`8e2063e`）。
+>
+> 以下兩項是查找途中發現的**既有設計缺口**，非拆分造成，**至今未動**。
+> 原為 Issue #143／#144，已整併回 Issue #142 統一追蹤。
+
+### §W1. quick→sequence 升級缺少分支與未 commit 變更的遷移步驟 — ⬜ 待辦
+
+> `references/execution-modes.md:33` 對升級只寫「將 Root 中未 commit 的變更帶入新工作區」，
+> 沒有定義**怎麼帶**。而 `wf-state.sh upgrade` 只改 state JSON（`mode`→sequence、`stage`→2），
+> **完全不碰 git**——所以 state 會顯示「已升級」，工作區卻可能根本沒建成。
+
+**實測確認的兩個硬阻礙**（2026-08-25 於暫存 repo 重現）：
+
+| 照文件執行 | 結果 |
+|:---|:---|
+| `git worktree add -b <branch> <path>`（沿用 ticket-id-dev-prep 的帶 `-b` 寫法） | `fatal: a branch named '...' already exists` |
+| `git worktree add <path> <branch>`（去掉 `-b`） | `fatal: '...' is already used by worktree at '<原 repo>'` |
+
+**兩種寫法都 fatal**——quick 模式直接在原 repo checkout 該分支，分支既存在又被佔用。
+且 `git worktree add` 不搬未 commit／已 staged／未追蹤的變更，即使建成也會把做到一半的工作留在原地。
+
+**已實測可行的步驟**（關鍵是文件漏掉的第 2 步）：
+
+```bash
+# 1. 未 commit 變更打成 WIP commit（不用 stash——stash 是 repo 層級，跨 worktree 易混淆；
+#    commit 跟著分支走，切過去自然帶到）
+git add -A && git commit -m "WIP: quick 升級前保存"
+
+# 2. 🔴 原 repo 切離該分支——文件漏掉這步，是唯一的失敗點
+git checkout main
+
+# 3. 為既存分支建 worktree（不帶 -b）
+git worktree add .claude/worktrees/<repo>-<slug> <branch>
+
+# 4. state 升級 + 搬移
+wf-state.sh upgrade <state 檔>
+mkdir -p <worktree>/.claude/workflow-state
+wf-state.sh promote <state 檔> --branch <branch> --dest <worktree>/.claude/workflow-state
+
+# 5. cd 進 worktree，接 STAGE 2
+```
+
+實測結果：worktree 內含已 commit 與原未 commit 的內容、untracked 檔也在；
+state 檔 `mode=sequence stage=2`，原 repo 的已由 `promote` 刪除。
+
+**但先問三個鐵律問題再決定要不要補**：
+
+1. **真實問題？** 部分——觸發條件只有「以為是小修正、動手發現不是」。實查 git 歷史與
+   state 目錄，**本 repo 至今無任何升級發生過的痕跡**。
+2. **更簡單的方法？** 有。撞到時 `git stash` 或 WIP commit → 走完整流程從 `origin/main`
+   拉新 worktree → 取回變更，三行指令，比修好 `upgrade` 便宜。
+3. **會破壞什麼？** 補文件不會。但要注意這條路徑**繞過 STAGE 0a/0b**——升級的理由通常是
+   「發現需要設計判斷」，直接接 STAGE 2 等於在沒有 spec/plan 的情況下做一件已知需要計畫的事。
+
+**兩個候選方案**：
+
+- **A. 補齊步驟** — 把上述實測過的五步寫進 `execution-modes.md`，並補失敗回復規則
+  （搬到一半失敗時如何還原）。附帶還要定義 `promote` 對 branch-scoped state 的
+  遷移來源／呼叫順序／目標路徑／來源刪除（目前文件只寫 pending 檔用法，
+  但實作接受任何通過 schema 校驗的檔案）。
+- **B. 移除 `upgrade`** — 文件改為「quick 中途發現超出範圍 → 停下、WIP commit、
+  走完整流程重新開始」，並拿掉 `wf-state.sh upgrade` 指令。
+  理由是 Linus 判準：`upgrade` 是為「不浪費已做的工作」長出的特殊情況，
+  但場景罕見、實作是壞的、繞過成本只有三行指令——**消滅特殊情況比修好它更有價值**。
+
+**⚠️ 附帶發現（比上述更該先做）**：`command-cheatsheet.md` 列了所有指令，卻**沒有任何一列
+說明升級怎麼觸發**。實際設計是「無使用者指令——由 Claude 判斷超標後停下提議，或使用者
+直接口頭要求」，但這件事只藏在 `execution-modes.md:33` 的一句話裡。
+**先讓人知道它怎麼被觸發，才輪得到它怎麼執行。**
+
+**Effort**：A 低（純文件）／B 低（刪指令 + 改文件）｜**價值**：⭐⭐（觸發機率低）
+
+### §W2. 委派子進程的檔案系統邊界仍是 Guide 而非 Sensor — ⬜ 待辦
+
+> 這是 §3(B) 第 4 項「Guide→Sensor」（`a557dfc` / Issue #134，2026-08-19 完成）的**殘留缺口**，
+> 即上表順位 6 標注的「**R5 的擴大範圍未做**……該檔檔頭已載明屬另案」——本節就是那個另案。
+
+**現況**：透過 `mcp__gemini-cli__ask-gemini` 委派的子進程具備寫檔、跑 shell、`git commit`
+能力，但限制它只能動指定 worktree 的手段是 **prompt 裡的一段文字**（委派紀律第 1、2 條）
+——那是寫給另一個 LLM 看的道德勸說，沒有強制力。
+
+`wf-guard-delegate-cwd.sh` 已註冊於 `.claude/settings.local.json:250,270`
+（`PreToolUse` / `PostToolUse`，matcher `mcp__gemini-cli__ask-gemini`），但涵蓋有限：
+
+| 端 | 做什麼 | 缺口 |
+|:---|:---|:---|
+| pre | 檢查派發 prompt 是否含目標 worktree 絕對路徑 | 檢查的是**字串**，不是實際能寫到哪 |
+| post | 以 `git status` 差集偵測越界寫入 | 只涵蓋主 repo 與已知 worktree，**寫到非 git 位置完全偵測不到**，且只告警不阻斷 |
+
+用 Böckeler 的框架講：這是 **Guide（前饋，可被忽略）**，但要達成的效果需要
+**Sensor（回饋，確定性、無法繞過）**。
+
+**候選方案**（需先驗證可行性，擇一或組合）：
+
+- 容器隔離（對單人 Flutter package 可能過度工程——brainstorm 已如此評估過 Dagger／Container Use）
+- 專用受限使用者 + 檔案系統權限
+- 受限掛載點
+- pre 端對**正規化後的絕對路徑**做強制校驗，而非字串比對
+- 若上述皆不可行：**限制寫入型委派，只允許唯讀分析**（最保守但確定有效）
+
+**刻意不做**：在 prompt 裡再加一段沒有強制力的文字——那正是本項批評的對象。
+也不改現有三條委派紀律的措辭（作為 Guide 仍有價值，只是不能當作邊界）。
+
+**Effort**：中～高（依方案而定）｜**價值**：⭐⭐⭐（安全強度，不影響日常執行）
+
+> **⚠️ 兩項都不影響正常流程執行**（2026-08-25 實查）：
+> §W1 只在「quick 中途超標」時觸發，本 repo 至今未發生；
+> §W2 是安全強度不足而非功能故障，委派本身正常運作，hook 也確實掛著。
+> 兩者皆非阻擋項，可依實際需要排程。
