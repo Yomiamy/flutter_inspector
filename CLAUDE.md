@@ -15,7 +15,7 @@ App 內除錯檢視工具（Flutter package）：把 log / network / navigator /
 | 每個檔案是什麼、放哪 | `docs/architecture/file-reference.md` |
 | 八條主要流程的時序圖（含 mergedTimeline 歸併） | `docs/architecture/data-flow.md` |
 
-⚠️ 這些文件會漂移（曾出現 `file-reference.md` 記版本 `1.6.0` 但實際已到 2.3.0）。
+⚠️ 這些文件會漂移——曾出現 `file-reference.md` 寫死版號、實際版本早已前進數個 minor 的情況。
 **以程式碼為準**，發現不符就順手修文件。
 
 ## 文件沒寫、但改壞會很痛的三件事
@@ -55,7 +55,9 @@ flutter test                                  # 全套 554 個，20–40s
 flutter test test/ui/console_tab_test.dart    # 單檔
 flutter analyze lib/ test/
 ./scripts/gen_test_coverage.sh                # coverage + genhtml
-make analyze_lint / make format / make fix
+make analyze_lint                             # dart analyze
+make format                                   # dart format
+make fix                                      # dart fix --apply
 ```
 
 **既有雜訊**：`flutter analyze` 目前有 **6 個** `deprecated_member_use` info
