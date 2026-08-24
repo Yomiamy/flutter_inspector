@@ -130,6 +130,7 @@ description: |
     🔴 第一步（不可跳過）：推進狀態至 STAGE 5
        - 既有工作區已存在 state 檔：wf-state.sh advance <state_file> 5 --confirmed
        - 新對話／獨立進入：wf-state.sh init --mode jump --stage 5 --branch <branch> --set pr=<PR>
+       ↑ 未執行此步就派發 responder = 流程違規，會被 wf-guard-stage-check.sh 攔下
     → 呼叫 responder agent 處理每條意見
     → 處理完畢 → 呼叫 reviewer agent 重新審查
     → 審查通過 → 呼叫 publisher agent 更新 PR 描述與留言
@@ -142,7 +143,9 @@ description: |
     🔴 第一步（不可跳過）：推進狀態至 STAGE 6
        - 既有工作區已存在 state 檔：wf-state.sh advance <state_file> 6 --confirmed
        - 新對話／獨立進入：wf-state.sh init --mode jump --stage 6 --branch <branch>
-    → 【文件同步】先呼叫 gen-sync-docs-by-branchs skill
+    → 【文件同步】先呼叫 gen-sync-docs-by-branchs skill，以當前處理的分支為
+      目標，把該分支的實際變更回寫到 docs 下的發想／結構說明文件
+      （brainstorm、architecture 等）
     → 【提交同步結果】呼叫 gen-commit skill 將文件變更 commit 進 git
     → 呼叫 worktree-close-cleanup skill 移除 STAGE 1 建立的 worktree
     → 僅移除 worktree 本身，**對應 branch 一律保留、不刪除**

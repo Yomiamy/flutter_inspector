@@ -46,7 +46,7 @@
 | `/gen-dev-workflow quick <描述>` | 小修正快速通道（限 ≤3 檔），不建 worktree |
 | `幫我做 <描述>` | 預設新功能完整流程，全程每個關卡暫停確認 |
 | `幫我做 <描述> --pause-level balanced` | 完整流程，只在重要節點暫停，減少打斷 |
-| `/gen-dev-workflow batch "<A>" "<B>"` | 批次佇列：多項各自獨立 worktree/branch/PR 依序執行 |
+| `/gen-dev-workflow batch "<A>" "<B>" --pause-level balanced` | 批次佇列：多項各自獨立 worktree/branch/PR 依序執行。**建議帶 `balanced`**——批次的意義是減少打斷，每項若還停五次就失去意義（不建議 `autonomous`，那會讓每個 PR 都不經過目就送出） |
 | `繼續` ／ `繼續上次` | 接續本 session 或當前 branch 的未完成流程 |
 | `繼續批次` | `/clear` 後於新 session 接續批次的下一項 |
 | `停止批次` | 中止批次（只刪佇列檔，branch/PR/worktree 保留） |

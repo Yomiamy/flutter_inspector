@@ -31,7 +31,7 @@ quick <描述或 #issue>
 - state 檔照寫：`wf-state.sh init --mode quick --branch <branch>` 建 `<branch-slug>.json`（存原 repo `.claude/workflow-state/`）——中斷後「繼續」照常續接，PR MERGED 照常自動刪檔。quick 不套用 stage 轉移表，但 schema 校驗與暫停點棘輪照常生效（唯一暫停點：PR 草稿確認前 `stage-done <檔> <目前-stage>`，確認後 `confirm` 再發布）。
 - 不建 worktree ⇒ 同一 repo **同時只能跑一個 quick**（需要多並行就走完整流程的 worktree 隔離）。
 - 中途發現超出小修正範圍（多檔設計判斷、新依賴、要動架構）→ 停下告知，`wf-state.sh upgrade <檔>`（單向 quick→sequence，stage 落在 2）升級轉入完整流程。升級後**必須立即**建立對應的 worktree（沿用 ticket-id-dev-prep 規則），將 Root 中未 commit 的變更帶入新工作區，用 `wf-state.sh promote` 將狀態 JSON 移至新工作區，並 `cd` 進入該工作區以確保物理隔離。
-- Token Budget Gate 照常適用（`> 150k` 切 session 規則不變；`100–150k` 的強制 MCP 委派不適用於 Quick 的直接實作步驟，Quick 模式本來就不委派 implementer）。
+- Token Budget Gate 照常適用（`> 150k` 切 session 規則不變；`100k ≤ context ≤ 150k` 的強制 MCP 委派不適用於 Quick 的直接實作步驟，Quick 模式本來就不委派 implementer）。
 - ⚠️ **`quick` + `balanced` 無作用**：quick 不拆任務（無 task 迴圈可關）、stage 是自由標籤（不匹配 `0b`/`2`/`4`），腳本會明示短路回 `strict`（`scripts/wf-state.sh` 的 `should_pause()`）。只有 `autonomous` 對 quick 有實效——關掉它唯一的 PR 暫停點。使用者若對 quick 指定 `balanced`，**直接告知無差別**，不要假裝有效果。
 
 ---
