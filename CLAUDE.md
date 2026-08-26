@@ -1,98 +1,75 @@
 # flutter_inspector_kit
 
-App 內除錯檢視工具（Flutter package）：把 log / network / navigator / database
-四種來源收在單一 API 後面，攤平成一條混合時間軸。
+App 內除錯檢視工具（Flutter Package）：把 log / network / navigator / database 四種來源收在單一 API 後，攤平成一條混合時間軸。
 
-**設計主張**：排查靠「鏈推斷」（不知道要找什麼，看事情怎麼演變成這樣），不是
-「點查詢」。任何會切斷前後文的設計都要先過這一關——這是否決 §D3（±5s 側欄）與
-§P2（錯誤上下文快照）的理由，動 filter / timeline 前先讀。
+**核心設計哲學**：排查靠「鏈推斷」（看事件演變脈絡），而非「點查詢」。任何切斷前後文的設計皆不被接受（如已否決的 ±5s 側欄與錯誤上下文快照）。
 
-## 架構文件（不要重寫，先讀）
+## 1. 架構文件導覽
 
-| 想知道 | 讀 |
-|:---|:---|
-| 分層、設計原則、WeakReference/錯誤鉤子/WebView 防護 | `docs/architecture/overview.md` |
-| 每個檔案是什麼、放哪 | `docs/architecture/file-reference.md` |
-| 八條主要流程的時序圖（含 mergedTimeline 歸併） | `docs/architecture/data-flow.md` |
-
-⚠️ 這些文件會漂移——曾出現 `file-reference.md` 寫死版號、實際版本早已前進數個 minor 的情況。
-**以程式碼為準**，發現不符就順手修文件。
-
-## 文件沒寫、但改壞會很痛的三件事
-
-**1. `RingBuffer.onMutate` → `revision` 是唯一的變更通道**
-
-四個 buffer 的 `onMutate` 全接到 `InspectorRegistry._bump()`，任一 buffer 變動就
-`revision.value++`。UI 只訂閱這一個 `ValueListenable<int>`，不逐 inspector 掛 listener。
-
-- `onMutate` 內**不可**再對同一 buffer `add`/`replace`/`clear`（重入仍在堆疊上的變更）
-- `InspectorRegistry` **不 dispose**（app-scoped 長生命週期）→ **取消訂閱是訂閱方的責任**，
-  加了 listener 就必須在 `dispose()` 移除，否則洩漏
-
-**2. `mergedTimeline()` 回傳 buffer 內的原始指標，不複製**
-
-所以 network entry 從 pending → completed，下次讀自然反映最新狀態，**不存在第二份真相**。
-過濾發生在收集階段（`if` 決定要不要讀某個 buffer），不是排序階段。
-要改成回傳 copy 之前，先想清楚會破壞這個不變式。
-
-**3. 緩衝型 vs 即時查詢型，是兩種不同的東西**
-
-| | 緩衝型（inspector） | 即時查詢型（browser source） |
+| 主題 | 參照路徑 | 核心內容 |
 |:---|:---|:---|
-| 資料 | 過去發生的事件，進 RingBuffer(500) | 當下的實際內容，呼叫時才查 |
-| 進時間軸 | ✅ | ❌ |
-| 註冊 | 內建四個，固定 | host 自行 register |
+| 系統架構 | `docs/architecture/overview.md` | 分層、設計原則、WeakReference、錯誤鉤子、WebView 防護 |
+| 檔案索引 | `docs/architecture/file-reference.md` | 模組結構與檔案職責（若與程式碼衝突以程式碼為準） |
+| 資料流向 | `docs/architecture/data-flow.md` | 8 條主要流程時序圖（含 `mergedTimeline` 歸併機制） |
 
-`TimelineSource` 只有 `{log, network, nav, db}`——**Storage tab 沒有對應項**，
-它是純即時查詢，不產生時序事件。`OperationLogSource` 是唯一的橋：把緩衝型的
-`DatabaseInspector` 包成 `DatabaseBrowserSource`，所以 Database tab 的下拉選單裡
-會同時出現「真實 DB」與「Operation log」兩種來源。
+## 2. 核心不變式與致命陷阱 (Critical Invariants)
 
-## 指令
+以下為本專案不可違背的關鍵設計約束，修改前必須理解：
+
+1. **`RingBuffer.onMutate` → `revision` 為唯一變更通道**
+   - 4 個 buffer 的 `onMutate` 統一觸發 `InspectorRegistry._bump()`（`revision.value++`）。
+   - UI 僅訂閱單一 `ValueListenable<int>`，禁止逐個 inspector 掛載 listener。
+   - `onMutate` 內**嚴禁重入**（不可再次對同一 buffer 執行 `add`/`replace`/`clear`）。
+   - `InspectorRegistry` 屬 App-scoped 長生命週期**不 dispose**；所有訂閱方（UI/Widget）**必須在 `dispose()` 中主動移除 listener**，否則必致記憶體洩漏。
+
+2. **`mergedTimeline()` 回傳原始物件指標（禁止防禦性複製）**
+   - 時間軸直接引用 buffer 內部 entry 物件，確保異步狀態（如 network pending → completed）自動反映最新值，**不存在第二份真相**。
+   - 過濾邏輯必須在收集階段（決定是否讀取 buffer）完成，而非排序後過濾。
+
+3. **緩衝型 (Inspector) vs 即時查詢型 (Browser Source) 嚴格分流**
+   - **緩衝型**（`log`, `network`, `nav`, `db`）：事件寫入 `RingBuffer(500)`，進入時間軸，由套件固定內建。
+   - **即時查詢型**（如 `Storage`、外部 DB）：呼叫時即時拉取，不產生時序事件，不進時間軸，由 Host 主動註冊。
+   - `OperationLogSource` 為唯一特例：將緩衝型 `DatabaseInspector` 包裝為 `DatabaseBrowserSource`。
+
+4. **條件匯出（Conditional Export）雙向簽章一致性**
+   - `network_notifier.dart` 與 `share_text.dart` 透過條件匯出切換 `_io.dart` 與 `_web.dart`。
+   - **修改任一側公開介面時，必須同步修改另一側的函式簽章**，否則 Web build 會崩潰且單元測試無法捕捉。
+
+5. **Flutter Package 純淨性與依賴限制**
+   - 本套件為輕量級除錯工具，核心禁止引入任何重量級狀態管理庫（如 BLoC、Riverpod、Provider），以原生效能元件（`ValueNotifier`、`StatefulWidget`）實作。
+
+## 3. 指令集與驗證基準 (Commands & Baseline)
 
 ```bash
-flutter test                                  # 全套 554 個，15–20s
-flutter test test/ui/console_tab_test.dart    # 單檔
-flutter analyze lib/ test/
-./scripts/gen_test_coverage.sh                # coverage + genhtml
+# 測試
+flutter test                                  # 全套測試 (554 tests, ~15–20s)
+flutter test test/ui/console_tab_test.dart    # 單檔測試
+
+# 分析與程式碼格式化
+flutter analyze lib/ test/                    # 靜態分析
 make analyze_lint                             # dart analyze
-make format                                   # dart format
+make format                                   # dart format .
 make fix                                      # dart fix --apply
+./scripts/gen_test_coverage.sh                # 覆蓋率報告產生 (coverage + genhtml)
 ```
 
-**既有雜訊**：`flutter analyze lib/ test/` 目前有 **7 個 info**——6 個
-`deprecated_member_use`（`withOpacity` ×4、Radio 的 `groupValue`/`onChanged`）
-加 1 個 `invalid_runtime_check_with_js_interop_types`（`share_text_web.dart:15`）。
-看到這 7 個不用查，**多出來的才是你這次引入的**。
+- **既有分析雜訊基準**：目前 `flutter analyze lib/ test/` 存在 **7 個既有 info**（6 個 `deprecated_member_use` 關於 `withOpacity` / `groupValue`，以及 1 個 `share_text_web.dart:15` 的 js interop 型別檢查）。**唯有超出這 7 個的新增 warning/info 才是本次改動引入的問題**。
+- **無 CI 機制（本機嚴格驗證）**：Repo 未設置 `.github/` CI workflow，所有測試與靜態分析完全依賴開發者與 Agent 本機執行確認。
+- **Makefile 死指令警告**：僅 `analyze_lint`、`format`、`fix` 可用；其餘如 `build_runner`、`launcher_icon`、`intl`、`analyze_custom`、`get` 等 target 缺少外部相依，禁止調用。
+- **Demo 專案邊界**：`example/` 僅為手動示範沙盒（`cd example && flutter run`），其內部測試檔為預設樣板，不作為自動化測試驗證目標。
 
-## 發版：版號在四處
+## 4. 發版規範：4 處版本號同步
 
-`pubspec.yaml` → `README.md` → `CHANGELOG.md` → **`lib/src/version.dart`**
+發布新版本時，必須**同時更新以下 4 處版本號**（任何一處遺漏皆屬發版 Bug）：
+1. `pubspec.yaml`
+2. `README.md`
+3. `CHANGELOG.md`
+4. `lib/src/version.dart`（`FlutterInspector.version` 依賴此檔，漏改將導致診斷輸出錯誤版本）
 
-IMPORTANT: 第四處最常漏（v1.6.0 已中招一次）。`FlutterInspector.version` 讀的就是
-`packageVersion`，漏改會讓診斷報告印出錯的版本號。
+## 5. 規範體系與邊界分工
 
-## 驗證只在本機，沒有 CI
+- **`CLAUDE.md`**（本檔）：AI Agent 開發與對話之主要上下文，專注於專案架構不變式、踩坑防護與指令集。
+- **`best_practices.md`**：專供 CodeRabbit / Qodo Merge 等 PR Review Bot 讀取之審查標準，**請勿與本檔合併或去重**。
+- **`.agents/rules/`（或 `.claude/rules/`）**：細部程式碼風格（`flutter-styles.md`）、專家原則（`expert-rules.md`）與 RTK 規範。
+- **開發流程**：標準開發與 Feature 推進請遵循 `.claude/skills/gen-dev-workflow`。
 
-repo **沒有 `.github/`**——沒有任何 workflow 會在 PR 上跑測試或 analyze。
-上面那些指令是唯一的把關，**你不跑就沒人跑**。
-
-⚠️ `Makefile` 有一批從樣板留下的死 target，相依根本不存在：
-`build_runner`／`build_watch`／`build_clean`（無 `build_runner` 相依）、
-`launcher_icon`（無 `flutter_launcher_icons`）、`intl`（無 `intl_utils`）、
-`analyze_custom`（無 `custom_lint`）、`get`（跑 `pod install`，但 root 沒有 `ios/`）。
-**只有 `analyze_lint`／`format`／`fix` 能用。**
-
-`example/` 是手動 demo，不是測試目標——`example/test/widget_test.dart` 是
-`flutter create` 的 counter 樣板、從未改過。要眼見為憑就 `cd example && flutter run`，
-別指望在那裡跑 `flutter test` 會抓到東西。
-
-## 其他
-
-- 風格／流程規範在 `.claude/rules/`（自動載入，勿在此重複）
-- 開發流程走 `.claude/skills/gen-dev-workflow`
-- `best_practices.md` 與 `.claude/rules/flutter-styles.md` 內容高度重疊，但**受眾不同**：
-  前者給 CodeRabbit／Qodo 的 PR bot 讀（`.coderabbit.yaml`、`.pr_agent.toml`），
-  後者給 Claude Code 讀。**別合併或去重**
-- `network_notifier.dart` 與 `share_text.dart` 用 conditional export 切 `_io`/`_web`，
-  **改一邊要同步另一邊的簽章**，否則只有 web build 會炸、單測抓不到
