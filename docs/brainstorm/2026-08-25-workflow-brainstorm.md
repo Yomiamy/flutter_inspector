@@ -1802,10 +1802,11 @@ Spec Kit、Kiro Specs、Agent OS、Vibe Kanban、Claude Squad、Stately Agent (X
 > 拆分殘留四項（STAGE 5 攔截後果、STAGE 6 同步範圍、batch `--pause-level`、
 > context 區間寫法）亦已修（`8e2063e`）。
 >
-> 以下兩項是查找途中發現的**既有設計缺口**，非拆分造成，**至今未動**。
+> 以下兩項是查找途中發現的**既有設計缺口**，非拆分造成。
 > 原為 Issue #143／#144，已整併回 Issue #142 統一追蹤。
+> **§W1 已於 2026-08-26 解決（`2929e2b`）；§W2 仍未動。**
 
-### §W1. quick→sequence 升級缺少分支與未 commit 變更的遷移步驟 — ⬜ 待辦
+### §W1. quick→sequence 升級缺少分支與未 commit 變更的遷移步驟 — ✅ 已解決（2026-08-26，採方案 B）
 
 > `references/execution-modes.md:33` 對升級只寫「將 Root 中未 commit 的變更帶入新工作區」，
 > 沒有定義**怎麼帶**。而 `wf-state.sh upgrade` 只改 state JSON（`mode`→sequence、`stage`→2），
@@ -1872,6 +1873,20 @@ state 檔 `mode=sequence stage=2`，原 repo 的已由 `promote` 刪除。
 
 **Effort**：A 低（純文件）／B 低（刪指令 + 改文件）｜**價值**：⭐⭐（觸發機率低）
 
+> **✅ 決議（2026-08-26 · commit `2929e2b`）：採方案 B，並一併補上附帶發現。**
+>
+> - `wf-state.sh` 的 `upgrade` 子命令、用法說明、`state-machine.md` 的表格列全數移除
+> - `execution-modes.md` 改為「**超出範圍時收工重來**」：WIP commit 或 stash → 照 STAGE 1 從
+>   `origin/main` 建新 worktree → 在新工作區 cherry-pick／stash pop → 刪掉 quick 的 state 檔。
+>   並就地記下「為什麼不做就地升級」（兩種 worktree 寫法皆 fatal、不搬未 commit 變更、
+>   落在 STAGE 2 等於跳過 0a/0b），避免日後有人重新推導一次
+> - `command-cheatsheet.md` 補上它從來沒有的那一列：**這件事怎麼觸發**——沒有指令，
+>   由 Claude 判斷後停下提議，或使用者直接口頭要求
+>
+> 選 B 不選 A 的理由：A 是把一條沒人走、走了也不該走的路修平；B 是承認這條路不該存在。
+> 繞過成本只有三行指令，而 `upgrade` 是為「不浪費已做的工作」長出的特殊情況——
+> **消滅特殊情況比修好它更有價值**。
+
 ### §W2. 委派子進程的檔案系統邊界仍是 Guide 而非 Sensor — ⬜ 待辦
 
 > 這是 §3(B) 第 4 項「Guide→Sensor」（`a557dfc` / Issue #134，2026-08-19 完成）的**殘留缺口**，
@@ -1906,6 +1921,6 @@ state 檔 `mode=sequence stage=2`，原 repo 的已由 `promote` 刪除。
 **Effort**：中～高（依方案而定）｜**價值**：⭐⭐⭐（安全強度，不影響日常執行）
 
 > **⚠️ 兩項都不影響正常流程執行**（2026-08-25 實查）：
-> §W1 只在「quick 中途超標」時觸發，本 repo 至今未發生；
+> ~~§W1 只在「quick 中途超標」時觸發，本 repo 至今未發生~~（已於 2026-08-26 解決）；
 > §W2 是安全強度不足而非功能故障，委派本身正常運作，hook 也確實掛著。
 > 兩者皆非阻擋項，可依實際需要排程。
