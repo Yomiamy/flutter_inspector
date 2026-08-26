@@ -35,7 +35,7 @@ MCP 呼叫**無法指定 cwd**，派發 prompt 第一段必須寫死絕對路徑
 一律停止並回報原因，等待指示，不要自行動手。
 ```
 
-> ⚠️ **已知限制：MCP 呼叫無法帶 `--print-timeout`**，長任務無逾時控制。
+> ⚠️ **已知限制：MCP 呼叫無法逐次帶 `--print-timeout`**——逾時只能靠 server 層環境變數統一設定，單次派發無法調整（細節見 `.claude/skills/gen-dev-workflow/references/mcp-delegation-discipline.md`）。
 >
 > 🔴 **`gh issue create` 是對外動作**：委派前必須已通過 STAGE 1 的暫停點（使用者確認過 Issue 標題與內容）。未確認不得派發。
 >

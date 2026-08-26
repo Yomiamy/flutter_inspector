@@ -29,7 +29,7 @@ tools: [Bash, Read, Write]
 **Fallback（MCP 不可用時）：**
 - 自行使用 `gen-pr` skill 產出 PR 描述草稿
 
-> ⚠️ **已知限制：MCP 呼叫無法帶 `--print-timeout`**，大型 diff 分析無逾時控制。diff 過大時先自行縮範圍再派發。
+> ⚠️ **已知限制：MCP 呼叫無法逐次帶 `--print-timeout`**——逾時只能靠 server 層環境變數統一設定，單次派發無法調整，且預設遠長於一般任務（細節見 `.claude/skills/gen-dev-workflow/references/mcp-delegation-discipline.md`）。大型 diff 分析實務上等同無有效保護，diff 過大時先自行縮範圍再派發。
 
 ## 職責
 - **委派分析：** 透過上述機制生成 PR 摘要草稿。
