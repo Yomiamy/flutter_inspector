@@ -50,6 +50,7 @@
 | `繼續` ／ `繼續上次` | 接續本 session 或當前 branch 的未完成流程 |
 | `繼續批次` | `/clear` 後於新 session 接續批次的下一項 |
 | `停止批次` | 中止批次（只刪佇列檔，branch/PR/worktree 保留） |
+| **quick 做到一半發現超出範圍** | **沒有指令**——由 Claude 判斷後停下提議，或你直接說「這超出範圍了，走完整流程」。作法是收工重來，不是接續升級（見 [`execution-modes.md`](execution-modes.md) 的「超出範圍時」） |
 | `PR #<id> 合併了，清理 worktree` | STAGE 6：**先推進狀態**（見下方「狀態前置步驟」）→ 同步文件 → commit → 移除 worktree（branch 保留） |
 
 ## 跳入特定階段 (`mode: jump`)

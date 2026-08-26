@@ -32,7 +32,6 @@ state 檔的**所有**建立、讀取、更新一律透過本 skill 的 `scripts
 | STAGE 2 單一任務完成 | `wf-state.sh task-done <檔> <n>` |
 | 使用者確認（stage 不變，如 STAGE 2 任務間） | `wf-state.sh confirm <檔>` |
 | 使用者確認並推進 stage | `wf-state.sh advance <檔> <next> --confirmed` |
-| quick 升級完整流程 | `wf-state.sh upgrade <檔> [--confirmed]`（單向 quick→sequence，stage 落在 2；有暫停點等待確認時須帶 `--confirmed`） |
 | 設定暫停粒度 | `wf-state.sh init --pause-level strict\|balanced\|autonomous`，或中途 `wf-state.sh set <檔> pause_level=<L>`（見主檔 [`../SKILL.md`](../SKILL.md) 的「暫停粒度」章節） |
 | 建立批次佇列 | `wf-state.sh batch-init <項目> ... [--pause-level <L>]` → 回傳批次檔路徑 |
 | 取批次下一項 | `wf-state.sh batch-next [<檔>]`（全跑完回傳 `DONE`；省略檔名自動定位唯一批次） |

@@ -31,9 +31,6 @@ usage() {
   wf-state.sh confirm <檔>                使用者已確認（清除等待旗標，stage 不變）
   wf-state.sh advance <檔> <next> --confirmed
       推進 stage。等待確認中且未帶 --confirmed → 拒絕；sequence 模式非法轉移 → 拒絕
-  wf-state.sh upgrade <檔> [--confirmed]
-      quick 升級為完整流程（mode→sequence、stage→2），單向：其他 mode 一律拒絕
-      等待確認中且未帶 --confirmed → 拒絕
 <檔> 可為路徑，或相對 $STATE_DIR 的檔名。
 
 批次佇列（多個獨立 workflow 依序執行，每項各自 worktree/branch/PR）：
@@ -298,21 +295,6 @@ case "$cmd" in
     f="$(resolve "$1")"
     validate "$f"
     jq '.awaiting_confirmation = false' "$f" | atomic_write "$f"
-    ;;
-
-  upgrade)
-    f="$(resolve "$1")"; shift || true
-    confirmed=false
-    [ "${1:-}" = "--confirmed" ] && confirmed=true
-    validate "$f"
-    mode="$(jq -r '.mode' "$f")"
-    [ "$mode" = "quick" ] || die "只允許 quick → sequence 升級（目前 mode：${mode}）"
-    awaiting="$(jq -r '.awaiting_confirmation' "$f")"
-    if [ "$awaiting" = "true" ] && [ "$confirmed" != "true" ]; then
-      die "有暫停點等待使用者確認中。先在對話中暫停詢問，獲確認後帶 --confirmed 重跑"
-    fi
-    jq '.mode = "sequence" | .stage = "2" | .awaiting_confirmation = false' "$f" | atomic_write "$f"
-    echo "quick → sequence，從 STAGE 2 接續"
     ;;
 
   advance)

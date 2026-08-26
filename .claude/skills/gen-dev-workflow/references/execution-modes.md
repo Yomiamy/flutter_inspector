@@ -30,7 +30,15 @@ quick <描述或 #issue>
 **規則：**
 - state 檔照寫：`wf-state.sh init --mode quick --branch <branch>` 建 `<branch-slug>.json`（存原 repo `.claude/workflow-state/`）——中斷後「繼續」照常續接，PR MERGED 照常自動刪檔。quick 不套用 stage 轉移表，但 schema 校驗與暫停點棘輪照常生效（唯一暫停點：PR 草稿確認前 `stage-done <檔> <目前-stage>`，確認後 `confirm` 再發布）。
 - 不建 worktree ⇒ 同一 repo **同時只能跑一個 quick**（需要多並行就走完整流程的 worktree 隔離）。
-- 中途發現超出小修正範圍（多檔設計判斷、新依賴、要動架構）→ 停下告知，`wf-state.sh upgrade <檔>`（單向 quick→sequence，stage 落在 2）升級轉入完整流程。升級後**必須立即**建立對應的 worktree（沿用 ticket-id-dev-prep 規則），將 Root 中未 commit 的變更帶入新工作區，用 `wf-state.sh promote` 將狀態 JSON 移至新工作區，並 `cd` 進入該工作區以確保物理隔離。
+- **超出範圍時：收工重來，不接續升級。** 中途發現超出小修正範圍（多檔設計判斷、新依賴、要動架構）→ 停下告知使用者，把已做的變更保存起來，然後**走完整流程重新開始**：
+
+  ```bash
+  git add -A && git commit -m "WIP: 超出 quick 範圍，轉完整流程"   # 或 git stash -u
+  ```
+
+  接著照 STAGE 1 的規則從 `origin/main` 建新的 worktree + branch，在新工作區取回變更（`git cherry-pick` 該 WIP commit，或 `git stash pop`），並刪掉 quick 的 state 檔。
+
+  **為什麼不做「就地升級」**：quick 直接在原 repo checkout 該分支，所以升級時分支既存在又被佔用——`git worktree add -b <branch>` 報 `already exists`、`git worktree add <path> <branch>` 報 `already used by worktree`，**兩種寫法都 fatal**（2026-08-25 實測）。而且 `git worktree add` 不搬未 commit／staged／untracked 的變更。更根本的是，觸發升級的理由通常是「發現需要設計判斷」，而就地升級會落在 STAGE 2，等於**跳過 0a/0b**，在沒有 spec/plan 的情況下做一件已知需要計畫的事。收工重來反而走完整規劃。
 - Token Budget Gate 照常適用（`> 150k` 切 session 規則不變；`100k ≤ context ≤ 150k` 的強制 MCP 委派不適用於 Quick 的直接實作步驟，Quick 模式本來就不委派 implementer）。
 - ⚠️ **`quick` + `balanced` 無作用**：quick 不拆任務（無 task 迴圈可關）、stage 是自由標籤（不匹配 `0b`/`2`/`4`），腳本會明示短路回 `strict`（`scripts/wf-state.sh` 的 `should_pause()`）。只有 `autonomous` 對 quick 有實效——關掉它唯一的 PR 暫停點。使用者若對 quick 指定 `balanced`，**直接告知無差別**，不要假裝有效果。
 
