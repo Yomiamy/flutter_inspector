@@ -51,7 +51,7 @@ App 內除錯檢視工具（Flutter package）：把 log / network / navigator /
 ## 指令
 
 ```bash
-flutter test                                  # 全套 554 個，20–40s
+flutter test                                  # 全套 554 個，15–20s
 flutter test test/ui/console_tab_test.dart    # 單檔
 flutter analyze lib/ test/
 ./scripts/gen_test_coverage.sh                # coverage + genhtml
@@ -60,9 +60,10 @@ make format                                   # dart format
 make fix                                      # dart fix --apply
 ```
 
-**既有雜訊**：`flutter analyze` 目前有 **6 個** `deprecated_member_use` info
-（`withOpacity`、Radio 的 `groupValue`/`onChanged`）。看到這 6 個不用查，
-**變成 7 個才是你這次引入的**。
+**既有雜訊**：`flutter analyze lib/ test/` 目前有 **7 個 info**——6 個
+`deprecated_member_use`（`withOpacity` ×4、Radio 的 `groupValue`/`onChanged`）
+加 1 個 `invalid_runtime_check_with_js_interop_types`（`share_text_web.dart:15`）。
+看到這 7 個不用查，**多出來的才是你這次引入的**。
 
 ## 發版：版號在四處
 
@@ -71,9 +72,27 @@ make fix                                      # dart fix --apply
 IMPORTANT: 第四處最常漏（v1.6.0 已中招一次）。`FlutterInspector.version` 讀的就是
 `packageVersion`，漏改會讓診斷報告印出錯的版本號。
 
+## 驗證只在本機，沒有 CI
+
+repo **沒有 `.github/`**——沒有任何 workflow 會在 PR 上跑測試或 analyze。
+上面那些指令是唯一的把關，**你不跑就沒人跑**。
+
+⚠️ `Makefile` 有一批從樣板留下的死 target，相依根本不存在：
+`build_runner`／`build_watch`／`build_clean`（無 `build_runner` 相依）、
+`launcher_icon`（無 `flutter_launcher_icons`）、`intl`（無 `intl_utils`）、
+`analyze_custom`（無 `custom_lint`）、`get`（跑 `pod install`，但 root 沒有 `ios/`）。
+**只有 `analyze_lint`／`format`／`fix` 能用。**
+
+`example/` 是手動 demo，不是測試目標——`example/test/widget_test.dart` 是
+`flutter create` 的 counter 樣板、從未改過。要眼見為憑就 `cd example && flutter run`，
+別指望在那裡跑 `flutter test` 會抓到東西。
+
 ## 其他
 
 - 風格／流程規範在 `.claude/rules/`（自動載入，勿在此重複）
 - 開發流程走 `.claude/skills/gen-dev-workflow`
+- `best_practices.md` 與 `.claude/rules/flutter-styles.md` 內容高度重疊，但**受眾不同**：
+  前者給 CodeRabbit／Qodo 的 PR bot 讀（`.coderabbit.yaml`、`.pr_agent.toml`），
+  後者給 Claude Code 讀。**別合併或去重**
 - `network_notifier.dart` 與 `share_text.dart` 用 conditional export 切 `_io`/`_web`，
   **改一邊要同步另一邊的簽章**，否則只有 web build 會炸、單測抓不到
