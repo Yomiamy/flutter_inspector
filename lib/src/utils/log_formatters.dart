@@ -39,7 +39,7 @@ String buildLogOneLiner(LogEntry entry) {
 
 /// Builds a full plain-text export of [entry] covering general info,
 /// stack trace, and data sections.
-String buildLogPlainText(LogEntry entry) {
+String buildLogPlainText(LogEntry entry, {bool isConcise = true}) {
   final b = StringBuffer()
     ..writeln('=== General ===')
     ..writeln('Message: ${entry.message}')
@@ -49,7 +49,7 @@ String buildLogPlainText(LogEntry entry) {
   b.writeln('\n=== Stack Trace ===');
   final stackTrace = entry.stackTrace;
   if (stackTrace != null && stackTrace.isNotEmpty) {
-    b.writeln(stackTrace);
+    b.writeln(isConcise ? normalizeStackTrace(stackTrace) : stackTrace);
   } else {
     b.writeln('(none)');
   }
@@ -63,4 +63,35 @@ String buildLogPlainText(LogEntry entry) {
   }
 
   return b.toString().trimRight();
+}
+
+/// Normalizes a stack trace string by collapsing consecutive framework-internal frames
+/// and converting asynchronous suspension gaps into a readable format.
+String normalizeStackTrace(String rawStack) {
+  final lines = rawStack.split('\n');
+  final result = <String>[];
+  int collapsedCount = 0;
+
+  void flushCollapsed() {
+    if (collapsedCount > 0) {
+      result.add('  [... $collapsedCount frames of framework internals]');
+      collapsedCount = 0;
+    }
+  }
+
+  for (final line in lines) {
+    if (line.trim().isEmpty) continue;
+
+    if (line.contains('<asynchronous suspension>')) {
+      flushCollapsed();
+      result.add('  <-- async gap -->');
+    } else if (line.contains('package:flutter/') || line.contains('dart:')) {
+      collapsedCount++;
+    } else {
+      flushCollapsed();
+      result.add(line);
+    }
+  }
+  flushCollapsed();
+  return result.join('\n');
 }
