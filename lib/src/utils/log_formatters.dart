@@ -20,8 +20,10 @@ String buildLogOneLiner(LogEntry entry) {
   // carriage return as a line ending too, so leaving it behind would let an
   // embedded ``` fence back onto line-start.
   final message = entry.message.replaceAll(RegExp(r'\r\n?|\n'), ' ');
+  final activeRouteStr =
+      entry.activeRoute != null ? ' (Active Route: ${entry.activeRoute})' : '';
   final b = StringBuffer(
-    '[${entry.displayTime}] [LOG/${entry.level.name}] $message',
+    '[${entry.displayTime}] [LOG/${entry.level.name}] $message$activeRouteStr',
   );
 
   final stackTrace = entry.stackTrace;
@@ -53,6 +55,10 @@ String buildLogPlainText(LogEntry entry, {bool isConcise = true}) {
     ..writeln('Message: ${entry.message}')
     ..writeln('Level: ${entry.level.name}')
     ..writeln('Timestamp: ${entry.timestamp.toIso8601String()}');
+
+  if (entry.activeRoute != null) {
+    b.writeln('Active Route: ${entry.activeRoute}');
+  }
 
   b.writeln('\n=== Stack Trace ===');
   final stackTrace = entry.stackTrace;

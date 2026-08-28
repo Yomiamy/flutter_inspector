@@ -81,6 +81,8 @@ class _LogDetailViewState extends State<LogDetailView> {
             'Timestamp',
             widget.entry.timestamp.toIso8601String(),
           ),
+          if (widget.entry.activeRoute != null)
+            DetailKeyValueRow.text('Active Route', widget.entry.activeRoute!),
         ],
       ),
     );

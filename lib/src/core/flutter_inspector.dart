@@ -308,6 +308,7 @@ class FlutterInspector {
         level: level,
         stackTrace: stackTrace,
         data: data,
+        activeRoute: _currentTopPageLabel(),
       ),
     );
   }
