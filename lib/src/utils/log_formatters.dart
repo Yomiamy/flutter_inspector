@@ -26,10 +26,18 @@ String buildLogOneLiner(LogEntry entry) {
 
   final stackTrace = entry.stackTrace;
   if (stackTrace != null) {
-    final frames = stackTrace
+    // 找出最相關的 App Callstack (過濾掉 framework 與 async gap)
+    final appFrames = stackTrace
         .split('\n')
         .where((l) => l.trim().isNotEmpty)
-        .take(3);
+        .where((l) =>
+            !l.contains('package:flutter/') &&
+            !l.contains('dart:') &&
+            !l.contains('<asynchronous suspension>'));
+            
+    // 若全都是 framework (雖然機率極低)，則 fallback 拿前 3 行；否則拿前 3 行 App Frames
+    final frames = (appFrames.isNotEmpty ? appFrames : stackTrace.split('\n').where((l) => l.trim().isNotEmpty)).take(3);
+
     for (final frame in frames) {
       b.write('\n  │ ${frame.trim()}');
     }
