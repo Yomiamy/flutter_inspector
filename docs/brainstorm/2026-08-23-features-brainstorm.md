@@ -3,6 +3,7 @@
 > **建立日期**：2026-06-25（原始檔名）
 >
 > **📝 更新紀錄 (Changelog)**：
+> * **2026-08-28**：**新增第六部分：開源除錯與日誌生態套件全面評估與整合策略**——針對社群主流除錯與日誌套件（涵蓋 talker_flutter, logger, alice/chucker_flutter, flutter_mxlogger, logging, logarte, stack_trace, flutter_ume, catcher 等 20+ 套件）進行 4 大維度深度評估（架構相容性、輕量與效能、UI/UX 視覺呈現、社群活力與穩定度）。以 Linus 模式核心判斷「拒絕重型黑盒全家桶替換核心、嚴守 Anti-Features（拒絕本機落盤與強依賴注入）」，並提出 4 項高 ROI、零新相依的務實整合提案（§P16 生態適配器 LogOutput/TalkerObserver、§P17 原生折疊 JSON 樹狀檢視器、§P18 輕量網路效能統計條、§P19 StackTrace 非同步鏈正規化）。
 > * **2026-08-22**：**§P15 鍵值儲存檢視器完成**——PR #137 合入 main（issue #136）。落地形式與原提案有一處關鍵差異：**實作為獨立 Storage tab，非併入 Database Tab**（理由：區分儲存引擎本身是 RD 需要的排查訊號）。該改動連帶消滅了「兩類 source 共存於同一 dropdown」的型別難題——`database_tab.dart` 最終一行未改。稽核 log 的值預設遮蔽（會經 `buildLogPlainText` 進剪貼簿與分享，而 KV source 可能是 secure storage）。Tier 4 剩 3 項（§P4 / §D4 / §P9）。檔名日期前綴由 `2026-08-14` 更新至 `2026-08-22`。
 > * **2026-08-14**：**新增 §P15 鍵值儲存檢視器（Key-Value / SharedPreferences Browser）**——針對 QA 與開發者排查 Token 過期、快取污染與 Feature Flag 異常痛點，提出基於 `KeyValueBrowserSource` 的 host-injection 介面與 Database Tab 整合方案（支援搜尋、即時編輯、刪除與清空操作，零新相依且寫入操作自動記 log 追蹤）。排入 Tier 4（最高排查價值項）。
 > * **2026-07-27**：**§D6 實查已完成**——經 codebase 比對，`pushInspectorRoute` 與 `kInspectorRoutePrefix` 皆已落實，此既有缺陷已修復。
@@ -826,6 +827,198 @@ ENTRIES: [NavigatorAction.push/NetworkDetailView, NavigatorAction.push/SizedBox]
 
 ---
 
+## 🌐 第六部分：開源除錯與日誌生態套件全面評估與整合策略（2026-08-28 新增）
+
+> **評估背景**：
+> 針對 Flutter 社群主流的除錯與日誌開源生態套件（涵蓋 ducafecat 推薦清單與 pub.dev 頂級庫共 20+ 套件）進行全面盤點與架構評估。
+> 評估遵循 Linus Torvalds 的實用主義哲學與「好品味」準則，以四項嚴格維度衡量：
+> 1. **架構相容性 (Architecture Compatibility)**：能否原生適配 `RingBuffer` O(1) 記憶體寫入、`TimestampedEntry` 統一契約、`mergedTimeline()` 跨層歸併時序軸與 Host-Injection 模式。
+> 2. **輕量與效能零負擔 (Lightweight & Performance Zero-Cost)**：零/極少外部相依、零磁碟污染（無 blocking I/O / SQLite 寫入）、無 PII 隱私外洩風險、零 GC 抖動與 WASM 相容。
+> 3. **UI/UX 視覺呈現品質 (Visual Presentation & Ergonomics)**：Material 3 風格、彩色日誌等級標籤、堆疊折疊、可折疊 JSON 樹狀檢視器、因果跳轉定位、暗黑/明亮主題相容。
+> 4. **社群活力與穩定度 (Community Activity & Long-term Stability)**：pub.dev 評分、維護活躍度、Flutter 3.35+ / Dart 3 / WASM 支援度。
+
+### 1. 套件生態原型分類與綜合評估
+
+我們將所有評估的 20+ 套件按「核心架構原型 (Archetype)」歸納為六大類別：
+
+#### 原型一：全功能應用內除錯套件 (All-in-One In-App Debug Suites)
+* **包含套件**：`talker_flutter` (`talker`), `alice` / `chucker_flutter`, `cr_logger`, `flutter_ume`, `logarte`, `ispect`, `let_log`, `flutter_debug_overlay`, `fconsole`。
+* **深度特性剖析**：
+  - **`talker_flutter`**（Likes: 755+，Popularity: 98%）：目前社群最成熟的綜合日誌與監控套件。優點是擁有強大的日誌格式化、UI 介面、豐富的擴充外掛（`talker_bloc_logger`, `talker_dio_logger`, `talker_riverpod_logger` 等）與自訂 Observer。缺點是其 UI 與日誌體系強綁定，預設日誌歷程儲存模型較重，若全面引入會與本 kit 的 `RingBuffer` 和 `Timeline` 地基造成概念重複與架構重疊。
+  - **`alice` / `chucker_flutter`**（Likes: 316 / 500+）：專注於 HTTP/Dio 網路請求攔截與視覺化檢視（含 cURL 匯出、通知快捷、回應格式化）。但兩者僅涵蓋網路層，缺乏跨層時序整合；部分分支（如舊版 Alice）維護停滯且缺少 WASM 支援。
+  - **`cr_logger`**（Likes: 48）：提供搖一搖呼出、網路/日誌/堆疊整合，但 UI 偏客製化、非標準 Material 3，且程式碼擴充性有限。
+  - **`flutter_ume`**（字節跳動，Likes: 121）：外掛式除錯平台（Kit 概念），但套件拆分過碎（10+ kits，如 `flutter_ume_kit_ui`, `flutter_ume_kit_device`, `flutter_ume_kit_console`）、重度依賴反射與 Widget Tree 遍歷，近年維護放緩，且與現代 Flutter 3.35+ / WASM 相容性欠佳。
+  - **`logarte`**（Likes: 213）：輕量級 App 內懸浮日誌與網路監控，UI 簡潔但功能較陽春，缺乏資料庫與生命週期觀測。
+  - **`ispect` / `let_log` / `fconsole` / `flutter_debug_overlay`**：多為 Talker 或 Alice 的二次封裝或簡單 Console Overlay，缺乏獨立架構優勢。
+
+#### 原型二：純日誌框架與終端格式化工具 (Logging Frameworks & Formatters)
+* **包含套件**：`logger` (`logger_flutter`), `logging` (Dart 官方), `loggy` (`flutter_loggy`), `fimber` (`flutter_fimber`), `lumberdash` (`colorize_lumberdash`, `file_lumberdash`, `print_lumberdash`), `simple_logger`, `surf_logger`, `roggle`, `quick_log`, `snug_logger`, `en_logger`, `cross_logger`, `verbose`。
+* **深度特性剖析**：
+  - **`logger`**（Likes: 2500+，社群標竿）：Simon Leier 開發的日誌格式化標準庫。其亮點在於極致優美的控制台邊框打印（`PrettyPrinter`）、豐富的 `LogFilter`/`LogOutput` 擴充機制與堆疊折疊能力。無 UI 負擔、零重量相依。
+  - **`logging`**（Likes: 945，Dart 官方）：官方標準抽象庫。採層級命名空間架構（hierarchical loggers）與 Stream 廣播機制，是無數企業級專案的標準介面。
+  - **`loggy` / `fimber` / `lumberdash`**：分別借鑒了 Android Timber 或 mixin 概念，提供樹狀種植（Tree planting）或日誌插件化能力，但本質上皆為純日誌管道，不具備 in-app UI。
+
+#### 原型三：高性能與二進制日誌引擎 (High-Performance / Binary & Disk Loggers)
+* **包含套件**：`flutter_mxlogger` (Tencent MMAP), `f_logs` / `flutter_logs` (SQLite/File DB), `fimber_io`。
+* **深度特性剖析**：
+  - **`flutter_mxlogger`**：騰訊開源、基於 MMAP 記憶體映射的高性能二進制日誌庫。適用於日誌量每秒萬條且保證 crash 不丟 log 的極端環境。但包含 C++ native 依賴，增加打包體積且無法在 Web (WASM) 運行。
+  - **`f_logs` / `flutter_logs`**：將日誌寫入本地 SQLite 或檔案系統，支援壓縮成 Zip 匯出。然而引入了本機磁碟 I/O 阻塞、儲存權限與資料庫版本遷移風險，且易在未脫敏情況下落盤敏感 Token。
+
+#### 原型四：錯誤攔截與堆疊處理專門庫 (Stack Trace & Error Handling Specialists)
+* **包含套件**：`stack_trace` (Dart 官方), `catcher` / `catcher_2`, `error_stack`, `native_stack_traces`, `anyhow`。
+* **深度特性剖析**：
+  - **`stack_trace`**（Dart 官方）：提供 `Trace` 與 `Chain` 類別，能完美解析、demangle、並將非同步中斷（`<asynchronous suspension>`）還原為完整因果鏈，過濾 core package 噪聲。
+  - **`catcher` / `catcher_2`**：全域未捕捉例外框架。其設計存在嚴重哲學缺陷：強制接管 `runApp`、在發生錯誤時彈出侵入式阻塞 Dialog 或自動發送 Email/HTTP，違反「不破壞用戶空間」與「本機除錯不連外」原則。
+
+#### 原型五：雲端 APM / 遙測與遠端桌面橋接 (Cloud APM, Telemetry & Desktop Bridges)
+* **包含套件**：`sentry_logging`, `instabug_flutter`, `flutter_bugfender`, `flutter_flipperkit`, `flutter_stetho`, `redux_remote_devtools`。
+* **深度特性剖析**：
+  - 此類套件目標為線上 APM 收集或外接桌面除錯器（如 Flipper / Chrome DevTools）。與本 kit「完全運行於裝置端、資料不出裝置、無外部伺服器依賴」的定位正交。
+
+#### 原型六：DevTools 輔助與終端工具 (Profiler & Terminal Utilities)
+* **包含套件**：`leak_tracker`, `vm_snapshot_analysis`, `lcov_parser`, `print_color`, `rich_console`, `sprintf`, `flutter_storyboard`, `snapp_cli`, `screen_state`。
+* **深度特性剖析**：
+  - 多數為開發時期的靜態分析或終端著色工具，不屬於即時除錯 Inspector 領域。
+
+---
+
+### 2. 綜合評估矩陣 (Comprehensive Evaluation Matrix)
+
+| 套件名稱 (Package) | 原型分類 | 維度 1：架構相容性 | 維度 2：輕量與效能 | 維度 3：UI/UX 呈現 | 維度 4：社群活力 | Linus 品味評級 | 最終裁決與處置 |
+|---|---|:---:|:---:|:---:|:---:|:---:|---|
+| **`talker_flutter`** | 全功能調試套件 | 🟡 部分（需 Adapter） | 🟡 中等（UI 相依多） | 🟢 優秀（豐富圖示） | 🟢 極高 (755+) | 🟡 湊合 | **不替換核心**；以 `TalkerObserver` 接線適配 |
+| **`logger`** | 純日誌框架 | 🟢 極佳（純輸出流） | 🟢 極佳（零多餘相依） | 🟢 優秀（終端邊框） | 🟢 頂級 (2500+) | 🟢 好品味 | **最佳日誌夥伴**；提供 `InspectorLogOutput` 適配器 |
+| **`logging`** (dart.dev) | 純日誌抽象 | 🟢 極佳（官方標準） | 🟢 頂級（官方零負擔） | ⚪ 無 UI | 🟢 頂級 (945+) | 🟢 好品味 | **標準支援**；提供 `onRecord.listen` 接線食譜 |
+| **`alice` / `chucker`** | HTTP 檢查器 | 🟡 僅涵蓋 Network | 🟡 中等（自帶儲存/UI） | 🟢 良好（HTTP 詳情） | 🟡 中等 (316+) | 🟡 湊合 | **不整合**；本 kit 之 NetworkTab 完整涵蓋且更輕 |
+| **`stack_trace`** | 堆疊處理 | 🟢 極佳（純演算法） | 🟢 頂級（官方工具） | 🟢 結構清晰 | 🟢 頂級 (331+) | 🟢 好品味 | **吸收技術**；正規化非同步堆疊與框架過濾 |
+| **`flutter_mxlogger`** | MMAP 二進制日誌 | 🔴 差（C++ native/無 Web）| 🟢 高性能但體積大 | ⚪ 無 UI | 🔴 低 (8) | 🔴 垃圾 | **拒絕**；破壞 WASM，違背 Anti-Features |
+| **`f_logs` / `flutter_logs`**| 本機 DB 日誌 | 🔴 差（綁定 SQLite/File）| 🔴 差（磁碟 I/O 阻塞） | ⚪ 無 UI | 🟡 中 (120/98) | 🔴 垃圾 | **拒絕**；違反「零磁碟落盤」鐵律 |
+| **`catcher` / `catcher_2`** | 錯誤捕獲與上報 | 🔴 差（破壞 userspace）| 🔴 差（阻塞式彈窗/上報）| 🟡 傳統對話框 | 🟡 舊套件 (597/52) | 🔴 垃圾 | **拒絕**；本 kit `UncaughtErrorHandler` 更優雅 |
+| **`flutter_ume`** | 外掛除錯平台 | 🔴 差（架構過重/拆分碎）| 🔴 差（反射/記憶體重） | 🟡 傳統 Window | 🔴 停滯 (121) | 🔴 垃圾 | **拒絕**；過度工程典型，維護已放緩 |
+| **`logarte`** | 輕量日誌控制台 | 🟡 僅 Log/Network | 🟢 輕量 | 🟡 陽春 | 🟡 中 (213) | 🟡 湊合 | **不整合**；功能為本 kit 子集 |
+| **`cr_logger`** | 應用內日誌套件 | 🟡 概念重疊 | 🟡 自帶多層 UI | 🟡 非標準 M3 | 🔴 低 (48) | 🟡 湊合 | **不整合**；代碼封閉，無借鑒價值 |
+| **`loggy` / `fimber`** | 日誌框架 | 🟢 良好（純日誌流） | 🟢 輕量 | ⚪ 無 UI | 🟡 中 (127/78) | 🟡 湊合 | **提供 README 食譜**，不新增直接相依 |
+| **`leak_tracker`** | 記憶體洩漏分析 | 🔴 需 DevTools 配合 | 🟡 追蹤開銷 | ⚪ 無 UI | 🟢 官方 (168) | 🟡 湊合 | **保持獨立**；交由官方 DevTools 處理 |
+
+---
+
+### 3. Linus 模式核心決策與架構批判
+
+#### 前置思考：三個鐵律問題檢驗
+1. **問題真實性**：「社群有現成的 Talker 或 UME，我們為什麼不直接換掉底層或整套搬過來？」
+   - *答*：這是典型的**「拿著錘子找釘子」**。現有 `flutter_inspector_kit` 已經在排查鏈上完成了 8 個全綠的關鍵閉環（未捕捉錯誤捕捉、Dio 結構化錯誤、4 源歸併時序軸、WebView 觀測、Storage 鍵值操作、Markdown 診斷報告）。社群套件大多是把一堆無關的工具塞進一個大黑盒，完全缺乏本專案以 `TimestampedEntry` 貫穿的因果鏈推斷能力。
+2. **有沒有更簡單的做法**？
+   - *答*：有！**「Adapter（轉譯器）模式」**。外部日誌框架（`logger`, `talker`, `logging`）產生的日誌，本質上只是一條文字與等級。透過薄薄的幾行適配器注入到 `inspector.log()`，就能零成本享受整個 Timeline、搜尋過濾與診斷報告，根本不需要把整個外部框架塞進 `pubspec.yaml`。
+3. **會破壞什麼嗎**？
+   - *答*：堅決不破壞用戶空間。外部相依零增加、API 零破壞。
+
+#### 核心決策一：為什麼絕不使用重型黑盒「全家桶」替換核心？
+* **拒絕 Talker 式的單體龐大化 (Monolithic Coupling)**：
+  Talker 試圖包辦一切（從日誌、Bloc、Riverpod、Dio、路由到自訂 UI）。但代價是引入龐大的相依鏈，並強迫消費端採用其特定的日誌資料模型。`flutter_inspector_kit` 採用 **Micro-Kernel + Host-Injection**：核心只有 `RingBuffer` 與 `InspectorRegistry`，其餘 Database、Storage、Diagnostic 全部由宿主按需注入。
+* **拒絕 UME 式的反射與碎裂化 (Over-engineered Plugin Matrix)**：
+  UME 把一個簡單的除錯需求拆成十幾個獨立 package，維護成本極高，且大量依賴 Element Tree 反射遍歷，在 Flutter 3.35+ 與 WASM 上頻頻出錯。
+* **拒絕 Catcher 式的侵入與吞錯 (Breaking Userspace Anti-pattern)**：
+  Catcher 在捕獲未處理異常時，會強行攔截並彈出全螢幕阻斷 Dialog 或發送 Email。這不僅中斷了使用者操作，更違背了「除錯工具不該改變應用原有行為」的底線。本 kit 的 `UncaughtErrorHandler` 以非侵入式 Chain 串接現有 handler，保留原汁原味的崩潰現場。
+
+#### 核心決策二：堅守 Anti-Features（拒絕本機落盤與強依賴注入）
+* **嚴禁引入本機落盤（SQLite / Hive Crash History DB）**：
+  許多日誌庫（如 `flutter_logs`, `f_logs`）主打「本地資料庫持久化」。這在理論上看似美好，但在實務上是災難：
+  1. **I/O 阻塞與 GC 抖動**：高頻日誌寫入 SQLite 會造成 UI 卡頓與 Jank。
+  2. **版本遷移地獄**：除錯工具自身的資料庫版本若與宿主衝突，將引發難以排查的 crash。
+  3. **隱私與安全暴雷**：未經 Redaction 脫敏的 Auth Token 或用戶密碼若落盤在 SQLite，在產線環境將構成嚴重的資安合規漏洞。
+  4. **好品味解法**：記憶體由 `RingBuffer`（500 筆上限）鎖定上限；排查證據由 `buildDiagnosticReport`（Markdown 報告）一鍵透過系統分享帶走。**排查要的是證據，不是留在手機裡的歷史資料庫！**
+
+---
+
+### 4. 具體可落地的 4 大整合提案
+
+基於上述評估，我們從社群優秀實踐中提煉出 **4 項高 ROI、零新相依、完全符合 Linus 好品味** 的具體功能提案：
+
+#### §P16. 生態日誌適配器（Ecosystem Adapters: `logger` & `talker` & `logging`）
+* **痛點**：許多專案已經在使用 `package:logger`、`package:talker` 或官方 `package:logging`，若要手動改呼叫 `FlutterInspector.log()` 會產生巨大的遷移摩擦。
+* **好品味設計（核心洞察）**：
+  > 不要讓宿主選邊站。外部日誌庫的日誌，只是一條 `LogEntry` 的原料。
+  - **零新相依**：不將 `logger` 或 `talker` 加入 `flutter_inspector_kit` 的 `pubspec.yaml`，而是提供純介面適配器與 README 接線食譜：
+    1. **`InspectorLogOutput`**（針對 `package:logger`）：
+       ```dart
+       // 宿主端 5 行接線：
+       class InspectorLogOutput extends LogOutput {
+         InspectorLogOutput(this.inspector);
+         final FlutterInspector inspector;
+         @override
+         void output(OutputEvent event) {
+           for (final line in event.lines) {
+             inspector.log(line, level: _mapLevel(event.level));
+           }
+         }
+       }
+       ```
+    2. **`InspectorTalkerObserver`**（針對 `package:talker`）：
+       ```dart
+       // 宿主端監聽 Talker 事件並轉入 Inspector
+       class InspectorTalkerObserver extends TalkerObserver {
+         InspectorTalkerObserver(this.inspector);
+         final FlutterInspector inspector;
+         @override
+         void onLog(TalkerData log) => inspector.log(log.generateTextMessage(), level: _mapLevel(log.logLevel));
+         @override
+         void onError(TalkerError err) => inspector.log(err.message, level: LogLevel.error, stackTrace: err.stackTrace);
+         @override
+         void onException(TalkerException exc) => inspector.log(exc.message, level: LogLevel.error, stackTrace: exc.stackTrace);
+       }
+       ```
+    3. **`InspectorLoggingHandler`**（針對官方 `package:logging`）：
+       ```dart
+       Logger.root.onRecord.listen((record) {
+         inspector.log(record.message, level: _mapLoggingLevel(record.level), stackTrace: record.stackTrace);
+       });
+       ```
+* **重用**：既有 `FlutterInspector.log()`、`LogEntry`、`LogLevel`。
+* **Effort**：trivial~low ｜ **排查價值**：⭐⭐⭐⭐（零相依打通百萬級日誌生態）
+
+---
+
+#### §P17. 原生折疊式 JSON 樹狀檢視器（Collapsible JSON Tree Viewer: `JsonTreeViewer`）
+* **痛點**：目前 `NetworkDetailView` 與 `LogDetailView` 在展示大型 JSON Payload / Response Body 時，只能顯示純文字或扁平的 `KeyValueTable`。當面對深層巢狀（3+ 層）物件或陣列時，排查者很難快速折疊無關分支或定位特定欄位，體驗落後於 Alice / Chucker 的 JSON 瀏覽器。
+* **好品味設計（核心洞察）**：
+  > JSON 解析完後就是 Dart 原生的 `Map<String, dynamic>` 與 `List<dynamic>`。不需要引入第三方肥大 json_viewer 套件，用一個 150 行以內的純原生遞迴 Widget 即可消滅問題。
+  - 新增 `JsonTreeViewer`（`lib/src/ui/widgets/json_tree_viewer.dart`）：
+    - 遞迴節點展開/折疊（預設展開前 2 層）。
+    - Material 3 語法色彩高亮：Key（紫）、String（綠）、Number（橘）、Bool（藍）、Null（灰）。
+    - 支援長按/點擊「一鍵複製節點 JSON 路徑與值」（如 `data.users[0].id`）。
+    - 支援文字搜尋過濾高亮。
+* **重用**：Material 3 主題配色、`KeyTheme`。
+* **品味守則**：零外部相依，純 Dart 遞迴渲染，性能極致（透過 `ListView.builder` 與扁平化節點清單避免 O(N²) 重建）。
+* **Effort**：medium ｜ **排查價值**：⭐⭐⭐⭐⭐（大幅提升 API 排查可讀性）
+
+---
+
+#### §P18. 輕量網路效能統計條（Lightweight Network Stats Bar）
+* **痛點**：排查網路群體故障時，除了個別錯誤聚合（§7），QA/開發者常需要一眼看到「總請求數、失敗率、平均響應時間、總傳輸量（Bytes）」，以評估是否發生網路劣化或流量異常。
+* **好品味設計（核心洞察）**：
+  > 這些統計數據全部已經躺在 `NetworkInspector` 的 `RingBuffer<NetworkEntry>` 裡！
+  > 不需要發明 Profiler，不需要定時器，只需要一個無狀態純函式 `calculateNetworkStats(entries)`。
+  - 在 `NetworkTab` 頂部新增一個高密度的 **Stats Bar**（單行 4 個指標）：
+    - `📊 Total: 142` ｜ `❌ Fail: 3 (2.1%)` ｜ `⚡ Avg: 185ms` ｜ `📦 Size: 1.2MB`
+  - 點擊指標可快速套用過濾（如點擊 `Fail` 觸發 `errors-only`）。
+* **重用**：`RingBuffer<NetworkEntry>`、`NetworkEntry.duration`、`NetworkEntry.responseBody` 長度。
+* **品味守則**：純計算投影，零儲存成本，不追 HAR 虛假分段 timings。
+* **Effort**：low ｜ **排查價值**：⭐⭐⭐⭐
+
+---
+
+#### §P19. StackTrace 非同步呼叫鏈與框架噪聲正規化（StackTrace Async Gap Normalization）
+* **痛點**：Flutter 拋出的 stackTrace 往往充斥大量框架內部長達數十行的內部呼叫（如 `package:flutter/src/widgets/framework.dart`），且在 async/await 跨越後會被 `<asynchronous suspension>` 分割成難以辨識的片段，真正出錯的業務程式碼被淹沒在噪聲中。
+* **好品味設計（核心洞察）**：
+  - 借鑒官方 `stack_trace` 套件的精髓（或內建輕量 Regex 剖析器）：
+    1. **折疊框架噪聲 (Frame Folding)**：自動將連續的 `package:flutter/*` 或 `dart:*` 內部 frame 摺疊為「*+ 12 Flutter internal frames*」，預設突出高亮 `package:宿主App/*` 的程式碼行。
+    2. **非同步鏈拼接 (Async Gap Demangling)**：清楚標示非同步跳轉點，並提供一鍵「複製精簡堆疊 (Concise Stack)」與「複製原始堆疊 (Raw Stack)」。
+* **重用**：`LogDetailView` 的 StackTrace 展示區塊、`share_text.dart`。
+* **品味守則**：可選使用 Dart 官方維護之 `stack_trace`（Dart SDK 內建或輕量相依），絕不破壞原始堆疊字串。
+* **Effort**：low–medium ｜ **排查價值**：⭐⭐⭐⭐
+
+---
+
 ## ❌ 拒絕實現的「垃圾」功能（Anti-Features）
 
 堅守「不走向微核心 / 過度工程」：
@@ -913,19 +1106,25 @@ ENTRIES: [NavigatorAction.push/NetworkDetailView, NavigatorAction.push/SizedBox]
 |------|------|:---:|:---:|
 | ~~**§P8** 慢請求標記~~ | NetworkTab 的 duration 閾值 + 🐢 標記 — ✅ 已完成（PR #111） | trivial | ✅ |
 | **§P4** 快速複製 Diagnostic Snippet | NetworkDetailView 一鍵 cURL + error payload | trivial~low | ⬜ |
-| ~~**§P15** 鍵值儲存檢視器（KV Browser）~~ | `KeyValueBrowserSource` 介面 + **獨立 Storage tab**（非併入 Database Tab）+ 讀寫操作 + README 範例 — ✅ 已完成（PR #137） | medium | ✅ |
+| **§P16** 生態日誌適配器 | `logger` (LogOutput) / `talker` (Observer) / `logging` 純介面轉譯適配器與 README 接線食譜 | trivial~low | ⬜ |
+| **§P18** 輕量網路效能統計條 | NetworkTab 頂部純計算 Stats Bar (Total / Fail / Avg Latency / Bytes) | low | ⬜ |
+| **§P19** StackTrace 非同步鏈正規化 | 框架噪聲折疊 (`+ N Flutter frames`) 與非同步中斷因果鏈還原 | low~med | ⬜ |
 | **§D4** DatabaseTab 搜尋/過濾 | 搜尋 + operation FilterChip | low~med | ⬜ |
+| **§P17** 原生折疊式 JSON 樹狀檢視器 | `JsonTreeViewer` 遞迴節點展開、語法高亮、路徑複製與搜尋 | med | ⬜ |
 | **§P9** Diagnostic Report JSON | 結構化 JSON 匯出格式 | med | ⬜ |
-| ~~**§P10** Rebuild 異常偵測~~ | ~~全清單唯一需逐 widget 接線，非 app 層級 flag~~ | ~~med~~ | ❌ |
+| ~~**§P15** 鍵值儲存檢視器（KV Browser）~~ | `KeyValueBrowserSource` 介面 + **獨立 Storage tab**（非併入 Database Tab）+ 讀寫操作 + README 範例 — ✅ 已完成（PR #137） | medium | ✅ |
+| ~~**§P10** Rebuild 異常偵測~~ | ~~全清單唯一需逐 widget 接線，非 app層級 flag~~ | ~~med~~ | ❌ |
 
 > **§P8 已完成**（PR #111 / Issue #110，v1.9.0 週期）——閾值改為 `FlutterInspector.slowRequestThreshold`
-> 可設定（預設 2s）並顯示於 UI，且 NetworkTab 與 ConsoleTab 混合時間軸**兩處都標**。本層剩 4 項。
+> 可設定（預設 2s）並顯示於 UI，且 NetworkTab 與 ConsoleTab 混合時間軸**兩處都標**。
+>
+> **2026-08-28 生態評估新增**：納入 **§P16 生態適配器**（trivial~low）、**§P18 輕量網路統計條**（low）、**§P19 堆疊正規化**（low~med）與 **§P17 原生折疊 JSON 檢視器**（med）。四者皆為零新相依、高排查 ROI 之打磨項目。本層活躍待辦現為 7 項（§P4 / §P16 / §P18 / §P19 / §D4 / §P17 / §P9）。
 >
 > **§P4 的 effort 下修為 trivial~low**（2026-08-06 實查）：`buildCurl` / `buildPlainText` / `shareText`
 > 皆已存在且已接 redaction 旗標，`PopupMenuButton<_ShareAction>` 選單也已在 detail view 就位——
-> 本項實為「既有選單多加一個 enum 值 + 一個組裝 formatter」，非從零新建 UI。本層現以它為最低成本入口。
+> 本項實為「既有選單多加一個 enum 值 + 一個組裝 formatter」，非從零新建 UI。
 >
-> **本層排序已改為 effort 升序**（原順序無排序意義）。四項寫入路徑仍互不重疊，可任意挑選或並行。
+> **本層排序已依 effort 升序編排**。各項寫入路徑互不重疊，可任意挑選或並行。
 
 ### 不排程
 
