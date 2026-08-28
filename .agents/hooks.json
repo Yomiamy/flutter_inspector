@@ -10,7 +10,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./.agents/hooks/cbm-reindex-on-sync.sh",
+            "command": "$PWD/hooks/cbm-reindex-on-sync.sh",
             "timeout": 0
           }
         ]
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./.agents/hooks/wf-guard-stage-check.sh",
+            "command": "$PWD/hooks/wf-guard-stage-check.sh",
             "timeout": 0
           }
         ]
