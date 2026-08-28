@@ -106,4 +106,4 @@
 | 檔案路徑 | 關鍵類別/列舉 | 單一職責 (Single Responsibility) |
 | :--- | :--- | :--- |
 | [`lib/src/extensions/log_level_color_extension.dart`](../../lib/src/extensions/log_level_color_extension.dart) | `LogLevelColor` | 為不同 `LogLevel` 的日誌提供語意化色彩映射。 |
-| [`lib/src/version.dart`](../../lib/src/version.dart) | `packageVersion` (String) | **[新增]** 定義當前 package 的版本資訊（應與 `pubspec.yaml` 同步為 `'1.6.0'`）。 |
+| [`lib/src/version.dart`](../../lib/src/version.dart) | `packageVersion` (String) | 定義當前 package 的版本資訊。**發版時必須與 `pubspec.yaml` 同步**——此處刻意不寫死版號，避免文件與實際版本漂移。 |
