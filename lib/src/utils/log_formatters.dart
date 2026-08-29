@@ -84,13 +84,19 @@ String buildLogPlainText(LogEntry entry, {bool isConcise = true}) {
 String normalizeStackTrace(String rawStack) {
   final lines = rawStack.split('\n');
   final result = <String>[];
-  int collapsedCount = 0;
+  final collapsedLines = <String>[];
 
   void flushCollapsed() {
-    if (collapsedCount > 0) {
-      result.add('  [... $collapsedCount frames of framework internals]');
-      collapsedCount = 0;
+    if (collapsedLines.isEmpty) return;
+
+    if (collapsedLines.length <= 2) {
+      result.addAll(collapsedLines);
+    } else {
+      result.add(collapsedLines.first);
+      result.add('  [... ${collapsedLines.length - 2} frames of framework internals]');
+      result.add(collapsedLines.last);
     }
+    collapsedLines.clear();
   }
 
   for (final line in lines) {
@@ -100,7 +106,7 @@ String normalizeStackTrace(String rawStack) {
       flushCollapsed();
       result.add('  <-- async gap -->');
     } else if (line.contains(RegExp(r'[\s\(]package:flutter/')) || line.contains(RegExp(r'[\s\(]dart:'))) {
-      collapsedCount++;
+      collapsedLines.add(line);
     } else {
       flushCollapsed();
       result.add(line);
