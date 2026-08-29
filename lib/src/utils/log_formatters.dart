@@ -33,8 +33,8 @@ String buildLogOneLiner(LogEntry entry) {
         .split('\n')
         .where((l) => l.trim().isNotEmpty)
         .where((l) =>
-            !l.contains('package:flutter/') &&
-            !l.contains('dart:') &&
+            !l.contains(RegExp(r'[\s\(]package:flutter/')) &&
+            !l.contains(RegExp(r'[\s\(]dart:')) &&
             !l.contains('<asynchronous suspension>'));
             
     // 若全都是 framework (雖然機率極低)，則 fallback 拿前 3 行；否則拿前 3 行 App Frames
@@ -99,7 +99,7 @@ String normalizeStackTrace(String rawStack) {
     if (line.contains('<asynchronous suspension>')) {
       flushCollapsed();
       result.add('  <-- async gap -->');
-    } else if (line.contains('package:flutter/') || line.contains('dart:')) {
+    } else if (line.contains(RegExp(r'[\s\(]package:flutter/')) || line.contains(RegExp(r'[\s\(]dart:'))) {
       collapsedCount++;
     } else {
       flushCollapsed();
