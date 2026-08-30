@@ -1531,7 +1531,7 @@ Orchestrator 維護一份持續更新的 `progress.md`，記錄：已完成的 M
 | **3** | 審查槓桿階層（原順位 1） | 🟢 新可學 | 極低 | 不變 |
 | **4** | context 主動巡航（原順位 2） | 🟢 新可學 | 低 | 不變 |
 | **5** | **改用 `SubagentStart` + 檢查 exit code**（R3/R4） | 🔴 修正實作 | 低 | `exit 1` 掛成 hook 無效；`SubagentStart` 可依 agent type 過濾，比手刻 payload 解析更穩 |
-| ~~**6**~~ | ~~Guide→Sensor：委派 cwd（原順位 3）~~ ✅ **已於 2026-08-19 完成** | 🟢 新可學 | 中 | `wf-guard-delegate-cwd.sh`：pre 端檢查派發 prompt 是否含目標 worktree 絕對路徑，缺失/不符即 `exit 2` 阻擋；post 端以 git status 差集偵測目標 worktree 以外的寫入與新增 commit（只告警不阻斷）。⚠️ **R5 的擴大範圍未做**——偵測建立在 git status 上，只涵蓋主 repo 與已知 worktree，寫入非 git 位置仍偵測不到（該檔檔頭已載明屬另案） |
+| ~~**6**~~ | ~~Guide→Sensor：委派 cwd（原順位 3）~~ ✅ **已於 2026-08-19 完成** | 🟢 新可學 | 中 | `wf-guard-delegate-cwd.sh`：pre 端檢查派發 prompt 是否含目標 worktree 絕對路徑，缺失/不符即 `exit 2` 阻擋；post 端以 git status 差集偵測目標 worktree 以外的寫入與新增 commit（只告警不阻斷）。⚠️ **R5 的擴大範圍未做**——偵測建立在 git status 上，只涵蓋主 repo 與已知 worktree，寫入非 git 位置仍偵測不到（該檔檔頭已載明屬另案）。該另案即 §W2，已於 2026-08-30 實查重新定性為 ⏸ 降級待命（Issue #152） |
 | **7** | anti-slop（原順位 4） | 🟡 條件性 | 低 | 不變 |
 
 > **為什麼順序變了**：原本四項全是「錦上添花」；第二輪查出的 R7 是**既有防護失效**、R1/R3 是**理由或實作錯誤**。
@@ -1804,7 +1804,9 @@ Spec Kit、Kiro Specs、Agent OS、Vibe Kanban、Claude Squad、Stately Agent (X
 >
 > 以下兩項是查找途中發現的**既有設計缺口**，非拆分造成。
 > 原為 Issue #143／#144，已整併回 Issue #142 統一追蹤。
-> **§W1 已於 2026-08-26 解決（`2929e2b`）；§W2 仍未動。**
+> **§W1 已於 2026-08-26 解決（`2929e2b`）；§W2 已於 2026-08-30 實查重新定性為 ⏸ 降級待命（Issue #152）**
+> ——原描述與 hook 實際程式碼脫節，剩餘缺口收斂為「非 git 位置寫入偵測不到」，
+> 且該委派路徑實際使用量趨近於零，附重啟條件見該節。
 
 ### §W1. quick→sequence 升級缺少分支與未 commit 變更的遷移步驟 — ✅ 已解決（2026-08-26，採方案 B）
 
@@ -1887,38 +1889,96 @@ state 檔 `mode=sequence stage=2`，原 repo 的已由 `promote` 刪除。
 > 繞過成本只有三行指令，而 `upgrade` 是為「不浪費已做的工作」長出的特殊情況——
 > **消滅特殊情況比修好它更有價值**。
 
-### §W2. 委派子進程的檔案系統邊界仍是 Guide 而非 Sensor — ⬜ 待辦
+### §W2. 委派子進程的檔案系統邊界：Sensor 已存在，觀測範圍受限於 git — ⏸ 降級待命（2026-08-30 實查重新定性）
+
+> **標題沿革**：原標題為「~~仍是 Guide 而非 Sensor~~」。2026-08-30 實查後該定性已不成立
+> （`wf-guard-delegate-cwd.sh` 的 pre/post 兩端都是確定性 Sensor），故改為現名。
+> 引用本節的舊標題時請注意此變更。
 
 > 這是 §3(B) 第 4 項「Guide→Sensor」（`a557dfc` / Issue #134，2026-08-19 完成）的**殘留缺口**，
 > 即上表順位 6 標注的「**R5 的擴大範圍未做**……該檔檔頭已載明屬另案」——本節就是那個另案。
+>
+> **🔴 2026-08-30 實查更新（Issue #152）**：本節原以 `⬜ 待辦` 描述的「現況」與
+> `wf-guard-delegate-cwd.sh`（390 行）實際程式碼嚴重脫節——原文寫於 2026-08-25，
+> 而該 hook 落地後歷經 `a557dfc` → `36a5996` → `3411455` 三次演進，文件未同步。
+> 下方現況表與候選方案表均已依實際程式碼重寫。
 
-**現況**：透過 `mcp__gemini-cli__ask-gemini` 委派的子進程具備寫檔、跑 shell、`git commit`
-能力，但限制它只能動指定 worktree 的手段是 **prompt 裡的一段文字**（委派紀律第 1、2 條）
-——那是寫給另一個 LLM 看的道德勸說，沒有強制力。
+**現況**（2026-08-30 逐行核對 `.claude/hooks/wf-guard-delegate-cwd.sh`）：
 
-`wf-guard-delegate-cwd.sh` 已註冊於 `.claude/settings.local.json:250,270`
-（`PreToolUse` / `PostToolUse`，matcher `mcp__gemini-cli__ask-gemini`），但涵蓋有限：
+透過 `mcp__gemini-cli__ask-gemini` 委派的子進程具備寫檔、跑 shell、`git commit` 能力。
+限制它的手段**不只是** prompt 裡的文字——`wf-guard-delegate-cwd.sh` 已註冊於
+`.claude/settings.local.json`（該檔為 gitignore 的本機設定，行號隨機器而異；
+2026-08-30 於本機實查為 `:252,272`）的 `PreToolUse` / `PostToolUse`
+（matcher `mcp__gemini-cli__ask-gemini`），在工具呼叫層攔截：
 
-| 端 | 做什麼 | 缺口 |
+| 端 | 實際行為 | 缺口 |
 |:---|:---|:---|
-| pre | 檢查派發 prompt 是否含目標 worktree 絕對路徑 | 檢查的是**字串**，不是實際能寫到哪 |
-| post | 以 `git status` 差集偵測越界寫入 | 只涵蓋主 repo 與已知 worktree，**寫到非 git 位置完全偵測不到**，且只告警不阻斷 |
+| pre | `run_pre()` 比對派發 prompt 是否含目標 worktree 絕對路徑，不符即 `sys.exit(2)`——**具實際阻擋力**（BUG-1 的 exit code 教訓已內化，程式碼內有註解標記）。另有 P-1～P-6 六道 false-positive 防護：payload 解析失敗、非委派工具、不在 worktree、無 state 檔、branch 對不上、stage 非 2，任一命中即放行 | 比對的是**派發意圖**（prompt 寫了哪個目錄），非子進程實際的寫入能力 |
+| post | `take_status()` 以 `git status --porcelain` 差集偵測目標 worktree 以外的寫入與新增 commit，命中則告警並寫入 `cwd-violations.log` | 只涵蓋主 repo 與已知 worktree，**寫到非 git 位置偵測不到**；只告警不阻斷 |
 
-用 Böckeler 的框架講：這是 **Guide（前饋，可被忽略）**，但要達成的效果需要
-**Sensor（回饋，確定性、無法繞過）**。
+原文宣稱的三項缺口，兩項已不成立：
 
-**候選方案**（需先驗證可行性，擇一或組合）：
+- ~~「pre 檢查的是**字串**，不是實際能寫到哪」~~ → 不成立。`is_allowed()` 兩側都
+  `os.path.realpath`，防 symlink 與 `..` 繞過，並以路徑分隔符為界避免
+  `/x/.pub-cache-evil` 被 `/x/.pub-cache` 誤判命中。
+- ~~「限制手段是 prompt 裡的一段文字，沒有強制力」~~ → 不成立。攔截點在 `PreToolUse`，
+  與子進程是否「願意讀 prompt」無關。
+- 「post 只告警不阻斷」→ **屬實，但為刻意設計**（程式碼標記 `U-1`）：PostToolUse
+  觸發時動作已完成，回捲無意義。這是機制的正確取捨，不是疏漏。
 
-- 容器隔離（對單人 Flutter package 可能過度工程——brainstorm 已如此評估過 Dagger／Container Use）
-- 專用受限使用者 + 檔案系統權限
-- 受限掛載點
-- pre 端對**正規化後的絕對路徑**做強制校驗，而非字串比對
-- 若上述皆不可行：**限制寫入型委派，只允許唯讀分析**（最保守但確定有效）
+另有原文未記載的既有防護：`whitelist_roots()` 動態解析 git 內部目錄、`PUB_CACHE`、
+Flutter/Dart SDK 根（由 `which` 反解，相容 fvm）與 `TMPDIR`，**禁止硬編碼標準路徑**；
+`diff_entries()` 只回報 after 新增項，委派前既有的 dirty 檔不算越界（P-9）；
+整體 fail-open（P-11），hook 自身壞掉不連帶卡死 workflow。
+純函式已有測試 `.claude/hooks/tests/test_delegate_cwd_logic.py`。
+
+**唯一剩餘的真實缺口**：寫入**非 git 位置**（其他專案、家目錄普通檔）偵測不到。
+這是以 `git status` 為觀測基底的固有天花板，非實作疏失。
+
+用 Böckeler 的框架講（§2.6）：本節標題「Guide 而非 Sensor」的定性**已不再成立**。
+pre 端的 `exit 2` 攔截與 post 端的 `git status` 差集都是**計算式、確定性的 Sensor**，
+不是可被忽略的 Guide。準確的說法是：**Sensor 已存在，但觀測範圍受限於 git**——
+缺的不是「把 Guide 升級成 Sensor」（§4 第 4 項，已於 `a557dfc` 完成），
+而是「把既有 Sensor 的觀測基底從 git 擴大到檔案系統」，那是性質不同、成本高一個量級的另一件事。
+
+**候選方案的實查判定**（2026-08-30）：
+
+| 候選方案 | 判定 | 依據 |
+|:---|:---|:---|
+| pre 端對正規化絕對路徑做強制校驗 | ✅ **已實作** | `is_allowed()` 雙側 `os.path.realpath` 比對 |
+| 容器隔離（Dagger／Container Use） | ❌ 出局 | 對單人 Flutter package 過度工程——本文件先前已如此評估 |
+| 專用受限使用者 + 檔案系統權限 | ❌ 出局 | 需改動系統層帳號，遠超問題嚴重度 |
+| 受限掛載點 | ❌ 出局 | 同上 |
+| 限制寫入型委派，只允許唯讀分析 | ⏸ 保留 | 唯一完全落在專案內且確定有效，但會實質閹割 STAGE 2 委派能力 |
+
+覆蓋非 git 位置需 fs-level 觀察。`docs/plans/2026-08-19-delegation-cwd-sensor.md:148`
+在原始實作時已界定此範圍：「要涵蓋任意檔案系統寫入，需要 fs-level 觀察
+（fswatch／eBPF／FUSE），成本與誤判率都遠高於本次範圍，屬另案。」
+macOS 另有 `/usr/bin/sandbox-exec` 可做真正的 fs 層限制，但 MCP server 於
+`~/.claude.json` 以 `npx -y gemini-mcp-tool` 啟動（`"env": {}`）——**那是全域設定，
+不在本 repo 內**，改它會影響所有專案而非僅此 repo，超出本專案可控範圍。
+
+**實用性判準**（Linus 第三條：解決真實存在的問題）：
+
+| 指標 | 實測值（2026-08-30） |
+|:---|:---|
+| `mcp__gemini-cli__ask-gemini` 累計呼叫 | **2 次**（`~/.claude.json` 的 `skillUsage`） |
+| `gemini` CLI | **未安裝**（`which gemini` → not found；本機僅有 `agy`） |
+| `cwd-violations.log` | **從未產生**（全 repo `find` 零命中） |
+
+此委派路徑的實際使用量趨近於零。為零使用量的路徑補強安全邊界，**複雜度與嚴重度不匹配**——
+這正是「解決想像中的威脅」而非真實問題。故由 `⬜ 待辦` 降為 `⏸ 降級待命`。
+
+**重啟條件**（滿足任一即重新評估）：
+
+1. 委派使用量顯著上升（`cwd-violations.log` 開始產生紀錄，或 `ask-gemini` 成為常態工具）
+2. MCP server 設定移入專案內（屆時 `sandbox-exec` 或等價方案落在可控範圍）
+3. 出現實際的越界事故
 
 **刻意不做**：在 prompt 裡再加一段沒有強制力的文字——那正是本項批評的對象。
 也不改現有三條委派紀律的措辭（作為 Guide 仍有價值，只是不能當作邊界）。
 
-**Effort**：中～高（依方案而定）｜**價值**：⭐⭐⭐（安全強度，不影響日常執行）
+**Effort**：中～高（依方案而定）｜**價值**：⭐⭐（安全強度，不影響日常執行；因使用量趨近於零，價值由 ⭐⭐⭐ 下修）
 
 > **⚠️ 兩項都不影響正常流程執行**（2026-08-25 實查）：
 > ~~§W1 只在「quick 中途超標」時觸發，本 repo 至今未發生~~（已於 2026-08-26 解決）；
