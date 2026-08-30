@@ -12,6 +12,7 @@ class LogEntry implements TimestampedEntry {
     this.level = LogLevel.info,
     this.stackTrace,
     this.data,
+    this.activeRoute,
     DateTime? timestamp,
   }) : timestamp = timestamp ?? DateTime.now();
 
@@ -31,6 +32,9 @@ class LogEntry implements TimestampedEntry {
   /// Optional structured payload attached to the log.
   final Map<String, dynamic>? data;
 
+  /// The active route at the time the log was recorded.
+  final String? activeRoute;
+
   /// Returns a copy of this entry with the given fields replaced.
   LogEntry copyWith({
     DateTime? timestamp,
@@ -38,6 +42,7 @@ class LogEntry implements TimestampedEntry {
     String? message,
     String? stackTrace,
     Map<String, dynamic>? data,
+    String? activeRoute,
   }) {
     return LogEntry(
       timestamp: timestamp ?? this.timestamp,
@@ -45,6 +50,7 @@ class LogEntry implements TimestampedEntry {
       message: message ?? this.message,
       stackTrace: stackTrace ?? this.stackTrace,
       data: data ?? this.data,
+      activeRoute: activeRoute ?? this.activeRoute,
     );
   }
 
@@ -55,12 +61,15 @@ class LogEntry implements TimestampedEntry {
         other.level == level &&
         other.message == message &&
         other.stackTrace == stackTrace &&
+        other.activeRoute == activeRoute &&
         mapEquals(other.data, data);
   }
 
   @override
-  int get hashCode => Object.hash(timestamp, level, message, stackTrace, data);
+  int get hashCode =>
+      Object.hash(timestamp, level, message, stackTrace, data, activeRoute);
 
   @override
-  String toString() => 'LogEntry(${level.name}, $message, $timestamp)';
+  String toString() =>
+      'LogEntry(${level.name}, $message, $timestamp, activeRoute: $activeRoute)';
 }

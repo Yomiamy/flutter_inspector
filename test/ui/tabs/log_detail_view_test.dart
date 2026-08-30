@@ -65,7 +65,7 @@ void main() {
       expect(find.text('(no data)'), findsOneWidget);
     });
 
-    testWidgets('Copy as text writes buildLogPlainText to clipboard', (
+    testWidgets('Copy concise writes buildLogPlainText to clipboard', (
       tester,
     ) async {
       String? clipboardText;
@@ -85,7 +85,7 @@ void main() {
 
       await tester.tap(find.byIcon(Icons.share));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Copy as text'));
+      await tester.tap(find.text('Copy concise'));
       await tester.pumpAndSettle();
 
       expect(clipboardText, isNotNull);
@@ -95,7 +95,7 @@ void main() {
       expect(clipboardText, contains('=== Data ==='));
     });
 
-    testWidgets('share menu contains Copy as text and Share items', (
+    testWidgets('share menu contains Copy concise and Share items', (
       tester,
     ) async {
       await tester.pumpWidget(
@@ -105,8 +105,8 @@ void main() {
       await tester.tap(find.byIcon(Icons.share));
       await tester.pumpAndSettle();
 
-      expect(find.text('Copy as text'), findsOneWidget);
-      expect(find.text('Share…'), findsOneWidget);
+      expect(find.text('Copy concise'), findsOneWidget);
+      expect(find.text('Share concise…'), findsOneWidget);
       // No cURL option
       expect(find.text('Copy as cURL'), findsNothing);
     });

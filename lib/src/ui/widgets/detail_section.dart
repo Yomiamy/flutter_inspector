@@ -4,10 +4,16 @@ import '../theme/theme.dart';
 
 /// A standard card container for sections in detail views.
 class DetailSection extends StatelessWidget {
-  const DetailSection({required this.title, required this.child, super.key});
+  const DetailSection({
+    required this.title,
+    required this.child,
+    this.trailing,
+    super.key,
+  });
 
   final String title;
   final Widget child;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -18,7 +24,20 @@ class DetailSection extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: Theme.of(context).textTheme.titleSmall),
+            if (trailing != null)
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ),
+                  trailing!,
+                ],
+              )
+            else
+              Text(title, style: Theme.of(context).textTheme.titleSmall),
             const SizedBox(height: ThemeSize.space8),
             child,
           ],
