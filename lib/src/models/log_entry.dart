@@ -66,8 +66,10 @@ class LogEntry implements TimestampedEntry {
   }
 
   @override
-  int get hashCode => Object.hash(timestamp, level, message, stackTrace, data, activeRoute);
+  int get hashCode =>
+      Object.hash(timestamp, level, message, stackTrace, data, activeRoute);
 
   @override
-  String toString() => 'LogEntry(${level.name}, $message, $timestamp, activeRoute: $activeRoute)';
+  String toString() =>
+      'LogEntry(${level.name}, $message, $timestamp, activeRoute: $activeRoute)';
 }

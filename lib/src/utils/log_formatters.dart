@@ -20,8 +20,9 @@ String buildLogOneLiner(LogEntry entry) {
   // carriage return as a line ending too, so leaving it behind would let an
   // embedded ``` fence back onto line-start.
   final message = entry.message.replaceAll(RegExp(r'\r\n?|\n'), ' ');
-  final activeRouteStr =
-      entry.activeRoute != null ? ' (Active Route: ${entry.activeRoute})' : '';
+  final activeRouteStr = entry.activeRoute != null
+      ? ' (Active Route: ${entry.activeRoute})'
+      : '';
   final b = StringBuffer(
     '[${entry.displayTime}] [LOG/${entry.level.name}] $message$activeRouteStr',
   );
@@ -32,13 +33,19 @@ String buildLogOneLiner(LogEntry entry) {
     final appFrames = stackTrace
         .split('\n')
         .where((l) => l.trim().isNotEmpty)
-        .where((l) =>
-            !l.contains(RegExp(r'[\s\(]package:flutter/')) &&
-            !l.contains(RegExp(r'[\s\(]dart:')) &&
-            !l.contains('<asynchronous suspension>'));
-            
+        .where(
+          (l) =>
+              !l.contains(RegExp(r'[\s\(]package:flutter/')) &&
+              !l.contains(RegExp(r'[\s\(]dart:')) &&
+              !l.contains('<asynchronous suspension>'),
+        );
+
     // 若全都是 framework (雖然機率極低)，則 fallback 拿前 3 行；否則拿前 3 行 App Frames
-    final frames = (appFrames.isNotEmpty ? appFrames : stackTrace.split('\n').where((l) => l.trim().isNotEmpty)).take(3);
+    final frames =
+        (appFrames.isNotEmpty
+                ? appFrames
+                : stackTrace.split('\n').where((l) => l.trim().isNotEmpty))
+            .take(3);
 
     for (final frame in frames) {
       b.write('\n  │ ${frame.trim()}');
@@ -49,6 +56,10 @@ String buildLogOneLiner(LogEntry entry) {
 
 /// Builds a full plain-text export of [entry] covering general info,
 /// stack trace, and data sections.
+///
+/// When [isConcise] is `true` (default), the stack trace is passed through
+/// [normalizeStackTrace] to collapse framework internals while preserving
+/// boundary frames. When `false`, the raw stack trace is included as-is.
 String buildLogPlainText(LogEntry entry, {bool isConcise = true}) {
   final b = StringBuffer()
     ..writeln('=== General ===')
@@ -93,7 +104,9 @@ String normalizeStackTrace(String rawStack) {
       result.addAll(collapsedLines);
     } else {
       result.add(collapsedLines.first);
-      result.add('  [... ${collapsedLines.length - 2} frames of framework internals]');
+      result.add(
+        '  [... ${collapsedLines.length - 2} frames of framework internals]',
+      );
       result.add(collapsedLines.last);
     }
     collapsedLines.clear();
@@ -105,7 +118,8 @@ String normalizeStackTrace(String rawStack) {
     if (line.contains('<asynchronous suspension>')) {
       flushCollapsed();
       result.add('  <-- async gap -->');
-    } else if (line.contains(RegExp(r'[\s\(]package:flutter/')) || line.contains(RegExp(r'[\s\(]dart:'))) {
+    } else if (line.contains(RegExp(r'[\s\(]package:flutter/')) ||
+        line.contains(RegExp(r'[\s\(]dart:'))) {
       collapsedLines.add(line);
     } else {
       flushCollapsed();
