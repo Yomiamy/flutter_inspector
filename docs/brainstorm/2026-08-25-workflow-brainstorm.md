@@ -1891,10 +1891,10 @@ state 檔 `mode=sequence stage=2`，原 repo 的已由 `promote` 刪除。
 
 ### §W2. 委派子進程的檔案系統邊界：Sensor 已存在，觀測範圍受限於 git — ⏸ 降級待命（2026-08-30 實查重新定性）
 
-> **標題沿革**：原標題為「~~仍是 Guide 而非 Sensor~~」。2026-08-30 實查後該定性已不成立
-> （`wf-guard-delegate-cwd.sh` 的 pre/post 兩端都是確定性 Sensor），故改為現名。
-> 引用本節的舊標題時請注意此變更。
-
+> **標題沿革**：原標題為「~~仍是 Guide 而非 Sensor~~」。2026-08-30 實查後該定性已不精確
+> （post 端的 `git status` 差集是確定性 Sensor；pre 端則是自動化 Guide／准入檢查，
+> 詳見下方「兩端性質」表），故改為現名。引用本節的舊標題時請注意此變更。
+>
 > 這是 §3(B) 第 4 項「Guide→Sensor」（`a557dfc` / Issue #134，2026-08-19 完成）的**殘留缺口**，
 > 即上表順位 6 標注的「**R5 的擴大範圍未做**……該檔檔頭已載明屬另案」——本節就是那個另案。
 >
@@ -1913,16 +1913,20 @@ state 檔 `mode=sequence stage=2`，原 repo 的已由 `promote` 刪除。
 
 | 端 | 實際行為 | 缺口 |
 |:---|:---|:---|
-| pre | `run_pre()` 比對派發 prompt 是否含目標 worktree 絕對路徑，不符即 `sys.exit(2)`——**具實際阻擋力**（BUG-1 的 exit code 教訓已內化，程式碼內有註解標記）。另有 P-1～P-6 六道 false-positive 防護：payload 解析失敗、非委派工具、不在 worktree、無 state 檔、branch 對不上、stage 非 2，任一命中即放行 | 比對的是**派發意圖**（prompt 寫了哪個目錄），非子進程實際的寫入能力 |
+| pre | `run_pre()` 比對派發 prompt 是否含目標 worktree 絕對路徑，不符即 `sys.exit(2)`——**對派發者失誤具實際阻擋力**（BUG-1 的 exit code 教訓已內化，程式碼內有註解標記）。另有 P-1～P-6 六道 false-positive 防護：payload 解析失敗、非委派工具、不在 worktree、無 state 檔、branch 對不上、stage 非 2，任一命中即放行 | 只比對**派發意圖**（prompt 寫了哪個目錄）。**對子進程的約束仍是 prompt 文字，子進程可忽略**——故此端是自動化 Guide，不是 Sensor |
 | post | `take_status()` 以 `git status --porcelain` 差集偵測目標 worktree 以外的寫入與新增 commit，命中則告警並寫入 `cwd-violations.log` | 只涵蓋主 repo 與已知 worktree，**寫到非 git 位置偵測不到**；只告警不阻斷 |
 
-原文宣稱的三項缺口，兩項已不成立：
+原文宣稱的三項缺口，逐項核對如下（**一項不成立、一項半成立、一項成立但非疏漏**）：
 
-- ~~「pre 檢查的是**字串**，不是實際能寫到哪」~~ → 不成立。`is_allowed()` 兩側都
-  `os.path.realpath`，防 symlink 與 `..` 繞過，並以路徑分隔符為界避免
-  `/x/.pub-cache-evil` 被 `/x/.pub-cache` 誤判命中。
-- ~~「限制手段是 prompt 裡的一段文字，沒有強制力」~~ → 不成立。攔截點在 `PreToolUse`，
-  與子進程是否「願意讀 prompt」無關。
+- 「pre 檢查的是**字串**，不是實際能寫到哪」→ **成立**（這點原文沒說錯）：
+  `run_pre()` 判斷的確實是 `target not in prompt`，管不到子進程實際往哪寫。
+  但**它擋的對象是派發者而非子進程**，在這個定位上是確定性的。
+  另需澄清：post 端比對路徑的 `is_allowed()` 兩側都 `os.path.realpath`，
+  防 symlink 與 `..` 繞過，並以路徑分隔符為界避免 `/x/.pub-cache-evil`
+  被 `/x/.pub-cache` 誤判命中——**該防護屬 post 端，不是 pre 端**，勿混為一談。
+- 「限制手段是 prompt 裡的一段文字，沒有強制力」→ **對子進程而言仍成立**，但對**派發者**
+  不成立：`PreToolUse` 的 `exit 2` 確定性攔截「派發時未寫對目錄」這個失誤，與子進程是否
+  「願意讀 prompt」無關。換言之，這一層擋的是派發者的手滑，不是子進程的違規。
 - 「post 只告警不阻斷」→ **屬實，但為刻意設計**（程式碼標記 `U-1`）：PostToolUse
   觸發時動作已完成，回捲無意義。這是機制的正確取捨，不是疏漏。
 
@@ -1932,13 +1936,25 @@ Flutter/Dart SDK 根（由 `which` 反解，相容 fvm）與 `TMPDIR`，**禁止
 整體 fail-open（P-11），hook 自身壞掉不連帶卡死 workflow。
 純函式已有測試 `.claude/hooks/tests/test_delegate_cwd_logic.py`。
 
-**唯一剩餘的真實缺口**：寫入**非 git 位置**（其他專案、家目錄普通檔）偵測不到。
-這是以 `git status` 為觀測基底的固有天花板，非實作疏失。
+**剩餘的真實缺口**：**所有未被「委派前後兩次 `git status` 取樣」呈現的檔案系統活動**。
+這不只是「寫到非 git 位置」一種形狀，至少還包括：
 
-用 Böckeler 的框架講（§2.6）：本節標題「Guide 而非 Sensor」的定性**已不再成立**。
-pre 端的 `exit 2` 攔截與 post 端的 `git status` 差集都是**計算式、確定性的 Sensor**，
-不是可被忽略的 Guide。準確的說法是：**Sensor 已存在，但觀測範圍受限於 git**——
-缺的不是「把 Guide 升級成 Sensor」（§4 第 4 項，已於 `a557dfc` 完成），
+- **短暫寫入**：委派期間在目標 worktree 外建檔又於 PostToolUse 前刪除，前後取樣無差異
+- **巢狀 repository／submodule 內部**：其內容不呈現在父 repo 的 `status` 中
+- **非 git 位置**：其他專案、家目錄普通檔
+
+三者同源——皆為以 `git status` 差集為觀測基底的固有天花板，非實作疏失。
+
+用 Böckeler 的框架講（§2.6）：本節標題「Guide 而非 Sensor」的定性**部分已不成立，但不能反向over-claim**。
+**兩端的性質不同，必須分開講**：
+
+| 端 | 性質 | 理由 |
+|:---|:---|:---|
+| pre | **自動化 Guide／准入檢查**（非 Sensor） | `run_pre()` 只判斷 `target not in prompt`，確定性攔截的是**派發者寫錯目錄**這個失誤。它約束子進程的手段仍是 prompt 文字，**子進程大可忽略該文字往別處寫**——這一層的強制力沒有變 |
+| post | **Sensor** | `git status` 差集是動手後的計算式偵測，不依賴子進程配合 |
+
+所以準確的說法是：**Sensor 已存在於 post 端，但觀測範圍受限於 git；pre 端則是把原本的人工紀律升級成自動化准入檢查**。
+缺的不是「把 Guide 升級成 Sensor」（§4 第 4 項，已於 `a557dfc` 完成該項所指的 hook 攔截），
 而是「把既有 Sensor 的觀測基底從 git 擴大到檔案系統」，那是性質不同、成本高一個量級的另一件事。
 
 **候選方案的實查判定**（2026-08-30）：
