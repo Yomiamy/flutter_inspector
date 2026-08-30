@@ -1016,6 +1016,8 @@ ENTRIES: [NavigatorAction.push/NetworkDetailView, NavigatorAction.push/SizedBox]
 * **重用**：`LogDetailView` 的 StackTrace 展示區塊、`share_text.dart`。
 * **品味守則**：可選使用 Dart 官方維護之 `stack_trace`（Dart SDK 內建或輕量相依），絕不破壞原始堆疊字串。
 * **Effort**：low–medium ｜ **排查價值**：⭐⭐⭐⭐
+* **✅ 實作現況（PR #149）**：`normalizeStackTrace` 實作完成。透過 Regex 安全識別 `package:flutter/` 與 `dart:` 呼叫並摺疊為 `[... N frames of framework internals]`，且刻意保留連續框架呼叫的**頭尾邊界 frames**，避免丟失重要呼叫上下文。非同步中斷處換為 `<-- async gap -->`。UI 端 `LogDetailView` 增加「Show raw/concise」切換按鈕，預設顯示 concise 堆疊，複製與分享功能會跟隨當下 UI 模式匯出對應內容；`buildLogPlainText` 預設輸出 concise 堆疊。
+
 
 ---
 
@@ -1108,7 +1110,7 @@ ENTRIES: [NavigatorAction.push/NetworkDetailView, NavigatorAction.push/SizedBox]
 | **§P4** 快速複製 Diagnostic Snippet | NetworkDetailView 一鍵 cURL + error payload | trivial~low | ⬜ |
 | **§P16** 生態日誌適配器 | `logger` (LogOutput) / `talker` (Observer) / `logging` 純介面轉譯適配器與 README 接線食譜 | trivial~low | ⬜ |
 | **§P18** 輕量網路效能統計條 | NetworkTab 頂部純計算 Stats Bar (Total / Fail / Avg Latency / Bytes) | low | ⬜ |
-| **§P19** StackTrace 非同步鏈正規化 | 框架噪聲折疊 (`+ N Flutter frames`) 與非同步中斷因果鏈還原 | low~med | ⬜ |
+| **§P19** StackTrace 非同步鏈正規化 | 框架噪聲折疊 (`[... N frames of framework internals]`) 與非同步中斷因果鏈還原 | low~med | ✅ |
 | **§D4** DatabaseTab 搜尋/過濾 | 搜尋 + operation FilterChip | low~med | ⬜ |
 | **§P17** 原生折疊式 JSON 樹狀檢視器 | `JsonTreeViewer` 遞迴節點展開、語法高亮、路徑複製與搜尋 | med | ⬜ |
 | **§P9** Diagnostic Report JSON | 結構化 JSON 匯出格式 | med | ⬜ |
