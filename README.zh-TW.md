@@ -22,6 +22,8 @@
 | 🛡️ **Sensitive-Data Redaction** | 預設即安全——敏感 headers（`Authorization`、`Cookie`、`Set-Cookie`、`X-Api-Key`）在每一條分享／匯出路徑上都會被遮罩 | 放心把 network log 分享給隊友或附進 Jira ticket，不會外洩 token 或 session cookie |
 | 🧭 **Navigator** | 自動追蹤 route 的 push、pop 與 replace；可在 **Event History**（原始 log）與 **Active Stack**（即時 route-stack 視覺化）之間切換。dashboard 自身的 route 會被濾掉，查 bug 不會反過來污染這份歷史 | 驗證 deep-link 路由、確認 back-stack 正確性，或在 QA 走查時診斷「使用者為什麼會落到這個畫面？」——而且因為點開詳情頁不會寫進歷史，翻查十分鐘後看到的 stack 仍然是你 App 的，不是你自己查問題的軌跡 |
 | 🗄️ **Database** | 記錄 insert / update / delete / query 操作，含受影響筆數與 payload；透過可插拔的 `DatabaseBrowserSource` 瀏覽真實資料表（已提供 SQLite / ObjectBox adapter） | 驗證「儲存」動作是否真的寫進預期的資料列；在裝置上直接瀏覽本地 SQLite 資料表，不必把 `.db` 檔拉出來 |
+| 🧵 **可讀的 Stack Trace** | 框架內部 frame 摺疊為 `[... N frames of framework internals]`（保留頭尾邊界 frame），非同步中斷點顯示為 `<-- async gap -->`；raw／concise 可一鍵切換，複製與分享匯出當下顯示的那一種 | 一個未捕捉錯誤吐出 40 行 `package:flutter/…`，把真正重要的兩行自家程式碼淹沒——concise 版本讓你不用捲動就看到自己的 frame，需要完整堆疊時再一鍵切回 raw |
+| 🧭 **Log Route 脈絡** | 每筆 log 都記錄寫入當下最上層的頁面，顯示於詳情頁與匯出內容 | 同樣一則「token refresh failed」，發生在結帳頁與發生在背景刷新是兩回事——記錄下來的 route 讓你事後讀時間軸時分得出來 |
 | 🛑 **Uncaught Error Capture** *(需 opt-in)* | 透過三個 Flutter hook（build/layout/paint、async、`ErrorWidget`）自動把未捕捉的錯誤轉成 `error` 等級的 Console log；串接既有 handler——絕不吞錯 | 某個未 await 的 `Future` 在第三方套件深處拋錯——附近完全沒有 `try/catch`。Uncaught error capture 自動連同完整 stack trace 記錄下來，不用任何手動埋點就出現在 Console |
 | ⏱️ **App Lifecycle Markers** *(需 opt-in)* | 把每一次 `resumed` / `inactive` / `paused` / `detached` 轉換記錄成 `info` 等級的 Console log，各自標註當下最上層的頁面，並交錯進合併時間軸 | 一批請求以 timeout 失敗，在辦公桌前卻怎麼都重現不了——翻時間軸，`App lifecycle: paused · CheckoutPage` 這筆就卡在它們前面，代表使用者切走了、OS 把網路凍結，根本不是後端的問題。反過來也好用：確認「回到前景就刷新」真的有觸發，而且是在哪一頁觸發 |
 | 🔔 **Live Notification** *(需 opt-in)* | 一則系統通知摘要最新一筆 API 呼叫與累計總數；點一下直接跳到 Network 分頁 | 在 App 內導覽時即時監看 API 流量——不必一直開著 dashboard；也適合驗證每個操作的 API 呼叫數是否合理（例如單一頁面載入就觸發數十筆呼叫，暗示有重複請求） |
@@ -48,7 +50,7 @@
 
 ```yaml
 dependencies:
-  flutter_inspector_kit: ^2.3.0
+  flutter_inspector_kit: ^2.4.0
 ```
 
 接著執行 `flutter pub get`。
@@ -394,7 +396,7 @@ inspector.log(
 要在長時間軸中縮小範圍，此分頁另外提供：
 
 - **搜尋** — 不分大小寫的關鍵字，比對每筆項目可讀的欄位：log 訊息與 stack trace、network 的 URL／method／status code、route 名稱，以及 database 的資料表與操作。
-- **等級 chips** — `Verbose`、`Debug`、`Info`、`Warning`、`Error`。這些**只**約束 log 項目，所以選了某個等級不會連帶把 network、navigation、database 事件一起藏起來。
+- **等級 chips** — `Verbose`、`Debug`、`Info`、`Warning`。這些**只**約束 log 項目，所以選了某個等級不會連帶把 network、navigation、database 事件一起藏起來。這裡刻意沒有 `Error` 等級 chip：它會把 `⚡ Errors only` 保留的失敗 network 呼叫濾掉，變成兩個都宣稱「隔離失敗」卻對「什麼算失敗」各執一詞的 chip。
 - **`⚡ Errors only`** — 跨型別隔離失敗項目：`warning`／`error` 等級的 log，加上失敗的 network 呼叫。
 - **點擊跳回** — 篩選啟用時，點任一列會清掉所有篩選條件，並把完整時間軸捲動到該筆項目，讓你把搜尋找到的那一列放回前後脈絡中閱讀。長按仍然是加書籤，篩選中也一樣可用。
 
@@ -416,6 +418,45 @@ for (final entry in entries) {
 ```
 
 `mergedTimeline` 回傳依 `timestamp` 遞減排序的 `List<TimestampedEntry>`。可用的來源：`TimelineSource.log`、`.network`、`.nav`、`.db`（預設全部）。這些項目是即時的 buffer 物件，所以一個 pending 的 network 呼叫在稍後完成時，會在下一次讀取時反映出來。
+
+### 可讀的 stack trace
+
+Flutter 的 stack trace 大半是框架內部的管線。因此 log 詳情頁預設顯示**精簡（concise）**版本：連續的 `package:flutter/…` 或 `dart:…` frame 會摺疊成單一標記，非同步中斷點也會明確標示出來。
+
+```text
+#0      CheckoutPage._submit (package:my_app/checkout/checkout_page.dart:88:5)
+#1      _rootRunUnary (dart:async/zone.dart:1407:47)
+  [... 14 frames of framework internals]
+#16     _WidgetsFlutterBinding.handleEvent (package:flutter/src/gestures/binding.dart:475:19)
+  <-- async gap -->
+#17     CheckoutPage.build.<anonymous closure> (package:my_app/checkout/checkout_page.dart:120:9)
+```
+
+每段摺疊區塊的**頭尾 frame 會刻意保留**——那裡正是控制權在你的程式碼與框架之間交界的位置，通常也是最值得讀的一段。
+
+詳情頁的 **Show raw／Show concise** 按鈕可在兩種形式間切換，而複製與分享會匯出**當下畫面上的那一種**，所以貼到 ticket 的 stack trace 與正在討論的內容一致。原始 stack trace 從不被修改——正規化純粹是呈現層的投影。
+
+同一個 helper 也可以直接在程式中使用：
+
+```dart
+// 摺疊任一 stack trace 字串中的框架噪聲。
+final concise = normalizeStackTrace(rawStackTrace);
+
+// log entry 的完整純文字匯出；預設為 concise。
+final text = buildLogPlainText(entry);
+final verbatim = buildLogPlainText(entry, isConcise: false);
+```
+
+### log 來自哪一頁
+
+每筆 `LogEntry` 都會記錄寫入當下最上層的頁面，存放於 `activeRoute` 欄位——自動填入，不需要你這端做任何接線。它會顯示在 log 詳情頁與純文字匯出中。
+
+```dart
+inspector.log('Token refresh failed', level: LogLevel.error);
+// entry.activeRoute == 'CheckoutPage'
+```
+
+同一則錯誤發生在結帳頁與發生在背景刷新，通常是兩個不同的 bug；事後回頭讀時間軸時，route 就是分辨兩者的依據。
 
 ### Uncaught error capture（需 opt-in）
 

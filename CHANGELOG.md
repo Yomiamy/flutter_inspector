@@ -1,3 +1,14 @@
+## 2.4.0
+
+### Added
+* **Stack traces are normalized before you read them**: A Flutter stack trace is mostly framework plumbing — dozens of consecutive `package:flutter/…` and `dart:…` frames burying the two lines of your own code that actually matter. Log detail views now show a *concise* stack trace by default, collapsing each run of framework-internal frames into a single `[... N frames of framework internals]` marker. The first and last frame of every collapsed run are deliberately kept, so the boundary between your code and the framework — the part that tells you where control crossed over — is never lost.
+* **Asynchronous gaps are marked explicitly**: `<asynchronous suspension>` separators are rendered as `<-- async gap -->`, so a stack trace broken across an `await` reads as one causal chain instead of two unrelated fragments.
+* **Raw / concise toggle, and exports follow what you see**: The log detail view carries a **Show raw / Show concise** switch, and the copy and share actions export whichever form is currently displayed — so a stack trace pasted into a ticket matches the one being discussed. `buildLogPlainText` defaults to the concise form and accepts `isConcise: false` for the untouched original. The raw stack trace is never mutated; normalization is purely a presentation-layer projection.
+* **Log entries record the active route**: `LogEntry` gains an `activeRoute` field, populated automatically with the top-most page at the moment the log was recorded, and shown in log detail views and plain-text exports. Where a log fired is often the missing half of why it fired — an error logged from `CheckoutPage` and the same error logged from a background refresh are different bugs.
+
+### Fixed
+* **The Console `Error` level chip no longer overlaps `⚡ Errors only`**: Both filters existed and claimed to isolate failures, but only `⚡ Errors only` spanned every source — the `Error` level chip silently constrained logs alone, so picking it hid failed network calls that the other chip kept. The redundant level chip is gone, leaving one unambiguous failure filter.
+
 ## 2.3.0
 
 ### Added
