@@ -11,7 +11,7 @@ In-app, multi-inspector debugging overlay for Flutter apps — logs, network, na
 
 | Feature | Description | Use Case Example |
 |---|---|---|
-| 🪵 **Console** | Capture logs across five severity levels (`verbose` / `debug` / `info` / `warning` / `error`), with optional structured data and stack traces | QA says "tapping checkout does nothing" — open Console, spot a red error entry in the timeline; tap in to see the structured error detail, response body, and full stack trace to understand what went wrong |
+| 🪵 **Console** | Capture logs across five severity levels (`verbose` / `debug` / `info` / `warning` / `error`), with optional structured data and stack traces; stack traces are shown in their concise form by default, with the raw trace one toggle away | QA says "tapping checkout does nothing" — open Console, spot a red error entry in the timeline; tap in to see the structured error detail, response body, and the stack trace with framework noise collapsed, so the frames from your own code are what you read first |
 | 📌 **Timeline Bookmark** | Long-press any timeline entry to bookmark it with a visual indicator, then quickly filter the view to show only bookmarked items | Found a suspicious request while scrolling through hundreds of logs? Bookmark it, then toggle the "Bookmarks" chip to isolate it alongside other key events without losing track of your place in the timeline |
 | 🧵 **Merged Timeline** | Console tab interleaves logs, network, navigation, and database events on one timestamp-sorted timeline, with per-source filter chips; error logs and failed network calls carry a faint red row tint so they stand out while scrolling | Continuing the checkout case — switch the source chip to "All" and scroll back along the timeline to inspect the request that got 401: check what token was in the `Authorization` header, what params were sent, and compare with backend expectations to pinpoint why the server rejected it — all without switching tabs or manually comparing timestamps |
 | 📡 **Network** | Intercept HTTP traffic via Dio; inspect structured request/response details; search/filter by URL, method, or status; share as cURL | A page shows up completely blank — open the Network tab to find the API returned an error, so there's no data to display; tap in to inspect request params and response body, then copy as a runnable cURL command and paste it into a bug ticket for the backend team to reproduce |
@@ -25,6 +25,8 @@ In-app, multi-inspector debugging overlay for Flutter apps — logs, network, na
 | 🧭 **Navigator** | Track route pushes, pops, and replacements automatically; toggle between **Event History** (raw log) and **Active Stack** (live route-stack visualization). The dashboard's own routes are filtered out, so investigating never pollutes the history | Verify deep-link routing, confirm back-stack correctness, or diagnose "why did the user land on this screen?" during a QA walkthrough — and since opening detail views doesn't write into the history, the stack you read after ten minutes of digging is still your app's, not a log of your own investigation |
 | 🗄️ **Database** | Record insert / update / delete / query operations with affected-row counts and payloads; browse real tables via pluggable `DatabaseBrowserSource` (SQLite / ObjectBox adapters provided) | Verify that a "Save" action actually wrote the expected rows; browse local SQLite tables on-device without pulling the `.db` file |
 | 🔑 **Storage** | Browse, edit, delete and clear key-value stores via pluggable `KeyValueBrowserSource` (SharedPreferences / SecureStorage adapter examples provided); every write is confirmed, and successful writes are logged | Check whether a stale token or a stuck feature flag is behind the bug — and clear it on-device, without an adb shell |
+| 🧵 **Readable Stack Traces** | Framework-internal frames collapse into a `[... N frames of framework internals]` marker (boundary frames preserved) and async suspensions render as `<-- async gap -->`; a raw/concise toggle switches the view, and the share menu exports either form explicitly | An uncaught error produces 40 lines of `package:flutter/…` around the two lines of your own code that matter — the concise view puts your frames back on screen without scrolling, and the raw form is one tap away when you need the full trace |
+| 🧭 **Log Route Context** | Every log entry records the top-most page at the moment it was written, shown in detail views and exports | The same "token refresh failed" error means different things from the checkout screen and from a background refresh — the recorded route tells the two apart when reading the timeline later |
 | 🛑 **Uncaught Error Capture** *(opt-in)* | Automatically turn uncaught errors into `error`-level Console logs via three Flutter hooks (build/layout/paint, async, `ErrorWidget`); chains existing handlers — never swallows errors | An unawaited `Future` throws deep inside a third-party package — no `try/catch` anywhere near it. Uncaught error capture logs it automatically with a full stack trace, so it shows up in Console without any manual instrumentation |
 | ⏱️ **App Lifecycle Markers** *(opt-in)* | Record every `resumed` / `inactive` / `paused` / `detached` transition as an `info` Console log, each naming the top-most page at that moment, interleaved into the merged Timeline | A batch of requests fails with timeouts that nobody can reproduce at a desk — read the Timeline and an `App lifecycle: paused · CheckoutPage` marker sits right before them, so the OS froze the network while the user switched away; the backend was never at fault. Equally useful in reverse: confirming a "refresh on resume" actually fires, and on which page |
 | 🔔 **Live Notification** *(opt-in)* | A system notification summarising the latest API call and the running total; tap to jump straight to the Network tab | Monitor API traffic in real-time while navigating the app — no need to keep the dashboard open; also useful for verifying whether the number of API calls per operation is reasonable (e.g., a single page load triggering dozens of calls hints at redundant requests) |
@@ -51,7 +53,7 @@ In-app, multi-inspector debugging overlay for Flutter apps — logs, network, na
 
 ```yaml
 dependencies:
-  flutter_inspector_kit: ^2.3.0
+  flutter_inspector_kit: ^2.4.0
 ```
 
 Then run `flutter pub get`.
@@ -397,7 +399,7 @@ The **Console** tab already interleaves logs, network, navigation, and database 
 To narrow a long timeline, the tab also offers:
 
 - **Search** — a case-insensitive keyword matched against each entry's readable fields: log messages and stack traces, network URLs, methods and status codes, route names, and database tables and operations.
-- **Level chips** — `Verbose`, `Debug`, `Info`, `Warning`, `Error`. These constrain *log* entries only, so picking one narrows your logs without hiding network, navigation, or database events.
+- **Level chips** — `Verbose`, `Debug`, `Info`, `Warning`. These constrain *log* entries only, so picking one narrows your logs without hiding network, navigation, or database events. There is deliberately no `Error` level chip: it would have hidden failed network calls that `⚡ Errors only` keeps, leaving two chips that both claimed to isolate failures but disagreed on what counts as one.
 - **`⚡ Errors only`** — isolates failures across types: `warning`/`error` logs together with failed network calls.
 - **Tap to jump back** — while a filter is active, tapping any row clears every filter and scrolls the full timeline to that same entry, so a row you found by searching can be read back in its surrounding context. Long-press still bookmarks the row, filtered or not.
 
@@ -419,6 +421,47 @@ for (final entry in entries) {
 ```
 
 `mergedTimeline` returns `List<TimestampedEntry>` sorted by `timestamp` descending. Available sources: `TimelineSource.log`, `.network`, `.nav`, `.db` (defaults to all). The entries are the live buffer objects, so a pending network call that later completes is reflected on the next read.
+
+### Readable stack traces
+
+A Flutter stack trace is mostly framework plumbing. Log detail views therefore show a **concise** stack trace by default: each run of consecutive `package:flutter/…` or `dart:…` frames collapses into a single marker, and asynchronous suspensions are labelled explicitly.
+
+```text
+#0      CheckoutPage._submit (package:my_app/checkout/checkout_page.dart:88:5)
+#1      _rootRunUnary (dart:async/zone.dart:1407:47)
+  [... 14 frames of framework internals]
+#16     _WidgetsFlutterBinding.handleEvent (package:flutter/src/gestures/binding.dart:475:19)
+  <-- async gap -->
+#17     CheckoutPage.build.<anonymous closure> (package:my_app/checkout/checkout_page.dart:120:9)
+```
+
+The first and last frame of every collapsed run are kept on purpose — that boundary is where control crossed between your code and the framework, which is usually the part worth reading.
+
+A **Show raw / Show concise** button in the detail view switches between the two forms. Exporting is a separate, explicit choice: the share menu offers **Copy concise**, **Copy raw**, **Share concise** and **Share raw**, and each exports the form its menu item names regardless of what is currently on screen — so you can read the concise trace while pasting the raw one into an issue tracker. The stored trace is never modified — normalization is a presentation-layer projection only.
+
+The same helpers are available programmatically:
+
+```dart
+import 'package:flutter_inspector_kit/flutter_inspector_kit.dart';
+
+// Collapse framework noise in any stack trace string.
+final concise = normalizeStackTrace(rawStackTrace);
+
+// Full plain-text export of a log entry; concise by default.
+final text = buildLogPlainText(entry);
+final verbatim = buildLogPlainText(entry, isConcise: false);
+```
+
+### Where a log came from
+
+Every `LogEntry` records the top-most page at the moment it was written, in its `activeRoute` field — populated automatically, with no wiring on your side. It shows up in the log detail view and in plain-text exports.
+
+```dart
+inspector.log('Token refresh failed', level: LogLevel.error);
+// entry.activeRoute == 'CheckoutPage'
+```
+
+The same error logged from a checkout screen and from a background refresh are usually different bugs; the route is what tells them apart after the fact.
 
 ### Uncaught error capture (opt-in)
 
