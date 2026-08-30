@@ -1931,7 +1931,9 @@ state 檔 `mode=sequence stage=2`，原 repo 的已由 `promote` 刪除。
   觸發時動作已完成，回捲無意義。這是機制的正確取捨，不是疏漏。
 
 另有原文未記載的既有防護：`whitelist_roots()` 動態解析 git 內部目錄、`PUB_CACHE`、
-Flutter/Dart SDK 根（由 `which` 反解，相容 fvm）與 `TMPDIR`，**禁止硬編碼標準路徑**；
+Flutter/Dart SDK 根（由 `which` 反解，相容 fvm）與 `TMPDIR`，**優先動態解析、並保留
+`~/.pub-cache`／`~/fvm`／`/tmp` 等 fallback**（設計原則見 `docs/features/2026-08-19-delegation-cwd-sensor.md:114`：
+以解析出的實際路徑為準，fallback 僅在解析不到時兜底）；
 `diff_entries()` 只回報 after 新增項，委派前既有的 dirty 檔不算越界（P-9）；
 整體 fail-open（P-11），hook 自身壞掉不連帶卡死 workflow。
 純函式已有測試 `.claude/hooks/tests/test_delegate_cwd_logic.py`。
@@ -1941,6 +1943,9 @@ Flutter/Dart SDK 根（由 `which` 反解，相容 fvm）與 `TMPDIR`，**禁止
 
 - **短暫寫入**：委派期間在目標 worktree 外建檔又於 PostToolUse 前刪除，前後取樣無差異
 - **巢狀 repository／submodule 內部**：其內容不呈現在父 repo 的 `status` 中
+- **`.gitignore` 忽略的檔案**：`take_status()` 用 `--untracked-files=normal` 而**未帶 `--ignored`**，
+  被忽略的檔案不進快照也不進 `diff_entries()`。此為**刻意設計**（程式碼標記 `P-10`）——
+  否則 build 產物與快取會把告警淹沒——但代價是這類寫入確實看不見
 - **非 git 位置**：其他專案、家目錄普通檔
 
 三者同源——皆為以 `git status` 差集為觀測基底的固有天花板，非實作疏失。
@@ -1962,15 +1967,16 @@ Flutter/Dart SDK 根（由 `which` 反解，相容 fvm）與 `TMPDIR`，**禁止
 | 候選方案 | 判定 | 依據 |
 |:---|:---|:---|
 | pre 端對正規化絕對路徑做強制校驗 | ✅ **已實作** | `is_allowed()` 雙側 `os.path.realpath` 比對 |
-| 容器隔離（Dagger／Container Use） | ❌ 出局 | 對單人 Flutter package 過度工程——本文件先前已如此評估 |
-| 專用受限使用者 + 檔案系統權限 | ❌ 出局 | 需改動系統層帳號，遠超問題嚴重度 |
-| 受限掛載點 | ❌ 出局 | 同上 |
+| 容器隔離（Dagger／Container Use） | ❌ 出局（**成本**，非能力不足） | 技術上做得到 fs 邊界，但對單人 Flutter package 過度工程——本文件先前已如此評估 |
+| 專用受限使用者 + 檔案系統權限 | ❌ 出局（**成本**，非能力不足） | 技術上做得到，但需改動系統層帳號，遠超問題嚴重度 |
+| 受限掛載點 | ❌ 出局（**成本**，非能力不足） | 同上 |
 | 限制寫入型委派，只允許唯讀分析 | ⏸ 保留 | 唯一完全落在專案內且確定有效，但會實質閹割 STAGE 2 委派能力 |
 
 覆蓋非 git 位置需 fs-level 觀察。`docs/plans/2026-08-19-delegation-cwd-sensor.md:148`
 在原始實作時已界定此範圍：「要涵蓋任意檔案系統寫入，需要 fs-level 觀察
 （fswatch／eBPF／FUSE），成本與誤判率都遠高於本次範圍，屬另案。」
-macOS 另有 `/usr/bin/sandbox-exec` 可做真正的 fs 層限制，但 MCP server 於
+macOS 另有 `/usr/bin/sandbox-exec`，是**目前環境可見、且不需改動本 repo 以外系統層設定**的
+fs 層限制候選（上表三個 ❌ 項技術上同樣做得到，差別在採用成本），但 MCP server 於
 `~/.claude.json` 以 `npx -y gemini-mcp-tool` 啟動（`"env": {}`）——**那是全域設定，
 不在本 repo 內**，改它會影響所有專案而非僅此 repo，超出本專案可控範圍。
 
