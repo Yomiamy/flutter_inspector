@@ -24,7 +24,7 @@
 
 ---
 
-## 📊 完成度總覽（截至 2026-08-22 · v1.9.0）
+## 📊 完成度總覽（截至 2026-09-01 · v2.4.0）
 
 > 以下狀態依實際 codebase 與 git history 核對標注。✅ 完成 ｜ 🟡 部分完成 ｜ ⬜ 未實作。
 >
@@ -1041,7 +1041,18 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
 | Permission Denials | Additional vital | ⚠️（需 host 餵） | host 在 call site 記入既有 log |
 | Crash rate | 1.09% | ✅（已有） | 既有 `captureUncaughtErrors`（可強化為 crash 前鏈快照） |
 
-### §P20. 掉幀/凍結幀維度（`capturePerformance`）— 🆕 旗艦
+### §P20. 掉幀/凍結幀維度（`capturePerformance`）— 🆕 旗艦 · ⚠️ 與 Anti-Feature #1 衝突待裁決
+
+> **🔴 動工前必讀（2026-09-01 交叉核對發現）**：本節設計與 **Anti-Feature #1 於 2026-08-14 覆核時明確否決的變體是同一個東西**（同樣是「不做 profiler 面板，只用 `SchedulerBinding.addTimingsCallback` 把單幀超標轉成離散事件併入 `mergedTimeline`」）。該否決的死因是 **debug build**：
+> 無 AOT、assert 全開，`buildDuration` 系統性偏慢數倍，判定掉幀會**大量誤報**而非漏報，timeline 會被假 jank 洗版，反過來污染 Console 這條原本乾淨的排查鏈；而本 kit 是 debug-only 工具，**誤判不是邊緣情況，是唯一情況**。
+>
+> 本節（2026-09-01 由 Google Play 品質門檻角度提出）**並未回應此否決理由**——對齊 Core Vital 是「為什麼值得做」，不構成「debug build 測得準」的反證。
+>
+> **本項狀態為「待裁決」，非「待辦」。** 排程前必須二擇一：
+> 1. **撤銷否決** — 需先提出 debug build 誤報的具體解法（例如僅在 profile/release 模式啟用、或以相對基準線取代絕對門檻），並同步改寫 Anti-Feature #1 的覆核段落；
+> 2. **撤下 §P20** — 維持 Anti-Feature #1 原判，本節降為「已評估／不排程」。
+>
+> 在裁決落地前，**不應進入實作排程**。
 
 * **痛點**：Slow Rendering 是 Core Vital，直接影響商店能見度。Play Console 只給**聚合百分比**（知道多爛、不知爛在哪一步）。app 內時間軸能提供 Console 拿不到的「烂在哪個事件之後」維度。
 * **好品味設計（核心洞察）**：
@@ -1099,7 +1110,7 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
 ### 第七部分優先順序建議
 
 1. **§P21 記憶體壓力**（trivial、強化既有、零風險）→ 暖身首選
-2. **§P20 掉幀維度**（旗艦、對齊 Core Vital、鏈推斷價值最高）→ 但需把 timestamp 地雷釘死在計畫
+2. **§P20 掉幀維度**（旗艦、對齊 Core Vital、鏈推斷價值最高）→ **⚠️ 目前為「待裁決」而非待辦**：與 Anti-Feature #1（2026-08-14 覆核）否決的變體同源，需先解決 debug build 誤報爭議；若裁決通過，另需把 timestamp 地雷釘死在計畫
 3. **§P22 權限** / **§P23 crash 鏈快照** → 依需要，兩者 API surface 都待再確認是否值得暴露
 
 > 各項寫入路徑：§P20 新增 `lib/src/models/jank_entry.dart` + `lib/src/inspectors/jank_inspector.dart` + 動 `inspector_registry.dart`/`flutter_inspector.dart`/`console_tab.dart`；§P21/§P22/§P23 皆強化既有維度，不新增檔案。
@@ -1113,6 +1124,7 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
 1. **完整效能 / Jank / 記憶體 Profiler**
    - *拒絕*：FPS 追蹤、frame drop、記憶體 profiling 是**另一個產品維度**，不是「錯誤排查」。Flutter 官方 DevTools 已有強大的 Performance/Memory view，in-app 重造只會是低配輪子。偏離主線，effort=high，**砍**。
    - **2026-08-14 覆核，維持原判**：曾評估一個看似繞得過本條的變體——不做 profiler 面板，只用 stdlib `SchedulerBinding.addTimingsCallback` 把「單幀超標」轉成一筆離散事件併入 `mergedTimeline`（零新相依，且是 app 層級 hook，無 §P10 那種逐 widget 接線問題）。**仍然否決，死因是 debug build**：debug 無 AOT、assert 全開，`buildDuration` 系統性偏慢數倍，判定掉幀會**大量誤報**而非漏報——timeline 會被假 jank 洗版，反過來污染 Console 這條原本乾淨的排查鏈。而本 kit 是 debug-only 工具，**誤判不是邊緣情況，是唯一情況**。連官方 DevTools 都須警告「debug 效能數據不具參考性、請用 profile mode」，in-app overlay 更無立場宣稱測得準。此變體與 Anti-Feature #6（第五個 `TimelineSource` 的全鏈路成本）亦有衝突，但**不必走到那一步就已出局**。
+   - **2026-09-01 交叉核對補記**：第七部分的 **§P20 掉幀/凍結幀維度**由 Google Play Core Vital 角度重新提出了**同一個設計**，且未回應本條的 debug build 誤報死因。**兩節目前互相衝突，尚未裁決**——在裁決前本條維持原判，§P20 不得逕自進入排程。詳見 §P20 節首的待裁決警示。
    - > 附帶結論（供日後看到同類套件清單時參考）：社群「Flutter 效能／崩潰分析」套件清單對本 kit **無一適用**——後端 telemetry SDK（sentry / crashlytics / newrelic / bugly …）與本 kit「資料不出裝置」的定位方向相反；FPS 小工具（statsfl / fps_monitor …）做的事十幾行 stdlib 即可取代且 `FrameTiming` 資料更完整（分得出 build 慢還是 raster 慢），但受制於上述 debug build 問題，取代了也沒用。**崩潰捕捉本 kit 已自有**（`uncaught_error_handler.dart` 三路 chain 且保留舊 handler），不需要 armor 這類「優雅恢復」——debug 階段要的是崩潰立刻現形，不是被吞掉。
 
 2. **跨 session 持久化 / 本機落盤的 crash history**
@@ -1205,7 +1217,7 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
 > **§P8 已完成**（PR #111 / Issue #110，v1.9.0 週期）——閾值改為 `FlutterInspector.slowRequestThreshold`
 > 可設定（預設 2s）並顯示於 UI，且 NetworkTab 與 ConsoleTab 混合時間軸**兩處都標**。
 >
-> **2026-08-28 生態評估新增**：納入 **§P16 生態適配器**（trivial~low）、**§P18 輕量網路統計條**（low）、**§P19 堆疊正規化**（low~med）與 **§P17 原生折疊 JSON 檢視器**（med）。四者皆為零新相依、高排查 ROI 之打磨項目。本層活躍待辦現為 7 項（§P4 / §P16 / §P18 / §P19 / §D4 / §P17 / §P9）。
+> **2026-08-28 生態評估新增**：納入 **§P16 生態適配器**（trivial~low）、**§P18 輕量網路統計條**（low）、**§P19 堆疊正規化**（low~med）與 **§P17 原生折疊 JSON 檢視器**（med）。四者皆為零新相依、高排查 ROI 之打磨項目。本層活躍待辦現為 6 項（§P4 / §P16 / §P18 / §D4 / §P17 / §P9）——**§P19 已於 PR #149 完成**（2026-09-01 實查確認 `log_formatters.dart:95` `normalizeStackTrace()` 與 `log_detail_view.dart:94` 的 concise/raw 切換皆已就位），故不計入。
 >
 > **§P4 的 effort 下修為 trivial~low**（2026-08-06 實查）：`buildCurl` / `buildPlainText` / `shareText`
 > 皆已存在且已接 redaction 旗標，`PopupMenuButton<_ShareAction>` 選單也已在 detail view 就位——
@@ -1229,8 +1241,8 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
 > 文件此前仍列為待辦——本層由 5 項降為 4 項（§P4 / §D4 / §P9 / ~~§P10~~）。同時查明 §P4 的既有
 > 可重用零件比原估計完整（`buildCurl` / `buildPlainText` / `shareText` 皆已接 redaction、
 > `_ShareAction` 選單已存在），effort 下修為 trivial~low，成為本層最低成本入口。
-> **這是同一份文件第二次出現「標為待辦、實際已完成」**（前一次為 §D6，於 2026-07-27 查核發現）——
-> 建議每次 release 後回頭跑一次 Tier 表的實查核對，別讓狀態欄漂移。
+> **這是同一份文件第三次出現「標為待辦、實際已完成」**（§D6 於 2026-07-27、§P8 於 2026-08-06、§P19 於 2026-09-01 查核發現）——
+> 「每次 release 後回頭跑一次 Tier 表實查核對」的建議前兩次都沒被執行，**因此不再只是建議**：狀態欄以實查為準，文件與 codebase 衝突時一律信 codebase。第三次漂移同時暴露另一個癥狀——本節標題的版本號曾停在 v1.9.0，而 pubspec 實為 v2.4.0，說明漂移不限於 Tier 表。
 >
 > **收尾建議（2026-07-25 二次更新）**：排查鏈的基礎建設已近完備（10 項原始功能中 9 項完成）。**Tier 1（§P13）已於 PR #100 完成**——真正往 timeline 加上原本拿不到的維度（前景/背景 + 切換頁面），且動工前逐項實查、無隱藏成本坑到。**Tier 2 的 §P7 已於 PR #101 完成**（error 行淡紅底，只染 error 不染 warning）。**下一步：§P11 → §P1 錯誤爆發偵測**（綁定排程，§P11 先行）——§P6 Dashboard Badge 已於 `b4846ea`（2026-08-07）完成，**Tier 2 僅剩此一項**。原被列為最高優先的 §D1 仍在 Tier 3 並與 §P5 合併，§P2 整項否決，理由見各節。
 >
