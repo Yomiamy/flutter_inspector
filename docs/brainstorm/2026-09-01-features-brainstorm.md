@@ -1021,6 +1021,91 @@ ENTRIES: [NavigatorAction.push/NetworkDetailView, NavigatorAction.push/SizedBox]
 
 ---
 
+## 🎯 第七部分：Google Play 品質要求（Q3-2026）× 執行時期排查（2026-09-01 新增）
+
+> **背景**：Google Play 2026 Q3「Elevating app quality」新增／收緊多項品質門檻——
+> [App quality 要求](https://support.google.com/googleplay/android-developer/answer/17492799)
+> 與 [Android vitals / Core Vitals](https://developer.android.com/topic/performance/vitals)。
+> 本部分評估：這些門檻涉及的**執行時期信號，哪些能在 app 進程內（純 Flutter/Dart）被 kit 觀測到並落進混合時間軸供鏈推斷**。
+>
+> **調研方法（2026-09-01）**：多 agent 對抗式調研——8 個信號各查 app 內可觀測性 → 可行者設計成 kit 功能 → 每個經 3 個 lens（技術可行性／不變式衝突／鏈推斷哲學）審查。
+
+### 查核結論：只有 4 類信號 app 內可觀測
+
+Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/build 層，kit 碰不到**（見下方「不可觀測」表）；剩 4 類可觀測且全部契合鏈推斷（進時間軸當因果原料，非孤立儀表數字）。
+
+| 信號 | Google 門檻 | app 內可觀測？ | 觀測機制 |
+|:---|:---|:---:|:---|
+| Slow Rendering（掉幀/凍結幀） | Core Vital | ✅ | `SchedulerBinding.addTimingsCallback` → `FrameTiming` |
+| Memory / LMK | Feb 2027 強制 | ✅（前導信號） | `WidgetsBindingObserver.didHaveMemoryPressure()` |
+| Permission Denials | Additional vital | ⚠️（需 host 餵） | host 在 call site 記入既有 log |
+| Crash rate | 1.09% | ✅（已有） | 既有 `captureUncaughtErrors`（可強化為 crash 前鏈快照） |
+
+### §P20. 掉幀/凍結幀維度（`capturePerformance`）— 🆕 旗艦
+
+* **痛點**：Slow Rendering 是 Core Vital，直接影響商店能見度。Play Console 只給**聚合百分比**（知道多爛、不知爛在哪一步）。app 內時間軸能提供 Console 拿不到的「烂在哪個事件之後」維度。
+* **好品味設計（核心洞察）**：
+  > 掉幀不是一個要顯示的「當前 FPS 數字」（那是被否決的即時儀表、切斷前後文的點查詢）。它是一個**帶時間戳的離散事件**，該落進混合時間軸。
+  - 新增 `JankEntry implements TimestampedEntry` + `JankInspector`（內含 `RingBuffer(500)` + 掛 `onMutate`），走「新增緩衝型維度」標準三件套。
+  - `SchedulerBinding.instance.addTimingsCallback((List<FrameTiming>){...})`：`buildDuration + rasterDuration` 超門檻（預設 32ms）即記一筆。
+* **公開 API**：建構式旗標 `bool capturePerformance = false`（對齊 `captureUncaughtErrors`/`captureLifecycleEvents`）+ `Duration jankThreshold`（對齊 `slowRequestThreshold` 門檻慣例）。**非** `registerXxx` 註冊式——緩衝型套件內建，不是 Host 註冊的即時查詢型。
+* **重用**：kit 已 import `SchedulerBinding`（`console_tab.dart` 用 `endOfFrame`）。零新相依。
+* **鏈推斷價值**：一次 700ms 凍結夾在時間軸的 network 回來、route push、db 查詢之間，讓「凍結發生在哪個大 JSON 之後／哪次跳轉當下」變成看得見的因果脈絡；且能分辨 build 期 jank（同步 decode／巨大 rebuild）與 raster 期 jank——這本來就需要前後文，非單一數字能給。
+* **🔴 動工必讀（3 個 lens 都獨立點出的實作地雷）**：
+  > `JankEntry.timestamp` **絕不能**用 `FrameTiming.timestampInMicroseconds`——那是 dart:ui 的 **monotonic 時鐘**（自 engine 啟動計時），不是 wall-clock epoch。既有 4 維 timestamp 全是 `DateTime.now()`。直接換算會讓 jank 事件在 `mergedTimeline` 降序排序時全甩到最舊端，**「掉幀在哪個 network 之後」這個唯一賣點當場歸零**，且單測不易抓（本機時間看似合理）。
+  >
+  > **正解（最笨最對）**：callback 觸發當下用 `DateTime.now()` 當 timestamp（延遲數十 ms，對因果排序精度綽綽有餘）；frame 的 build/raster **duration** 照實記進 payload（monotonic diff 的正當用途，不受 epoch 影響）。
+* **次要**：Web 平台 `FrameTiming` 上報不完整，需明講降級（不 crash 但「四平台一致」在 Web 打折）；`TimelineSource` enum 加 jank 要同步 `mergedTimeline` / console_tab filter chip 三處。
+* **Effort**：low~medium ｜ **排查價值**：⭐⭐⭐⭐⭐（對齊 Core Vital，鏈推斷價值最高）
+
+### §P21. 記憶體壓力事件（`captureMemoryPressure`）— 🆕 最省
+
+* **痛點**：Memory usage（RSS+Swap / Bitmap）Feb 2027 強制。真正的 RSS 數值需 platform channel（粗糙且跨平台不一），但 **OOM/LMK 前的「記憶體壓力」是 Dart 層唯一拿得到的前導信號**。
+* **好品味設計**：
+  > `WidgetsBindingObserver.didHaveMemoryPressure()` 是 Flutter SDK 內建回呼，而 kit 的 `LifecycleHandler` 已經是 observer——**多接一個 callback 即可**，寫進既有 log／lifecycle 時間軸，不新增 Entry/Inspector/RingBuffer。
+* **公開 API**：`bool captureMemoryPressure = false`（或直接併入既有 `captureLifecycleEvents`——記憶體壓力與前景/背景切換同屬「生命週期觀測」語意，共用同一個 `WidgetsBindingObserver`）。二擇一待定。
+* **重用**：`LifecycleHandler` 既有 observer + 既有 log 維度。零新相依。
+* **鏈推斷價值**：把 OOM 前唯一的 Dart 層前導信號插進時間軸，讓 crash 前的 memory pressure 與其之前的 network/route/db 並排，讀出「壓力密集出現在載入大圖之後」這種因果推斷。
+* **Effort**：trivial ｜ **排查價值**：⭐⭐⭐⭐（強化既有維度，零風險，建議當暖身第一項）
+
+### §P22. 權限被拒便利方法（`permissionDenied(...)`）— 🆕 弱但有用
+
+* **痛點**：Permission Denials 是 Additional vital。但 Flutter framework **無任何 permission binding**——沒有可被動訂閱的全域信號源（實查 `network_notifier_io.dart`：kit 只在自己的 call site 拿得到權限回傳值）。
+* **好品味設計**：
+  > 不設新緩衝型維度（沒有可掛的觀測源）。提供薄便利方法讓 **host 在拒絕的 call site 主動記入既有 log**，帶 `activeRoute` 錨點。
+* **公開 API**：`permissionDenied(permission, {activeRoute})`——對齊既有 `log`/`logNetwork`/`database` 每維度一具名 forward 的慣例（**非** `capture` bool flag，因為 kit 無法自動觀測、只能被動接收 host 餵的資料）。
+* **哲學審查提醒**：philosophy lens 判為 **weak**——它**不提供新的因果原料**（permission 資訊 host 在 call site 已握有），kit 只多貢獻 `activeRoute` 錨點與時序。價值真實但有限，API surface 是否值得暴露待定（可能只需文件示範用既有 `log` 記即可，不必新增方法）。
+* **Effort**：trivial ｜ **排查價值**：⭐⭐
+
+### §P23. Crash 前因果鏈快照（強化既有 `captureUncaughtErrors`）— 🆕 待評估
+
+* **痛點**：Crash rate 門檻 1.09%（Core Vital）。kit 已有 `captureUncaughtErrors`，但目前只記「錯誤本身」。
+* **方向（尚未細設計）**：crash 發生時，既有 `mergedTimeline` 已天然保留了 crash 前的完整 log/network/nav/db 事件鏈——診斷報告已能匯出。待評估的是「是否需要在 crash 當下自動觸發一次診斷報告匯出/標記」，讓 QA 拿到的 crash 報告自帶前因果鏈。
+* **注意**：這必須小心不要變成被否決的「錯誤上下文快照」（§P2，固定挑幾個維度釘在 error 旁 → 預設因果單線）。正解仍是完整 `mergedTimeline`，此項頂多是「crash 時自動觸發既有匯出」，不新增快照機制。
+* **Effort**：low ｜ **排查價值**：⭐⭐⭐（待確認是否與既有診斷報告重疊）
+
+### ❌ app 內不可觀測（誠實劃界，勿浪費工）
+
+以下 Google 信號的核心部分在 Dart 執行之前、或 OS/build 層，kit **無法觀測**，不應為湊數硬做代理：
+
+| 信號 | 為何 app 內拿不到 |
+|:---|:---|
+| **DEX 優化**（Feb 2027 強制） | build-time R8 指標，runtime 零 Dart API。完全不可行 |
+| **Zero-tap sign-in restoration**（Apr 2027） | 靜默重登發生在 Flutter engine attach 之前的 native `BackupAgent.onRestore`（Kotlin/Java），framework 無 binding |
+| **App Startup Time** | Dart 只拿得到「首幀」這個殘缺代理；真起點（VM warmup、`Application.onCreate` 前）在 Dart 執行之前 |
+| **Wake locks / Wakeups / 背景耗電** | Android kernel 電源會計，`PowerManager.WakeLock` acquire/release 在 OS 層，Dart 觀測不到 |
+| **真 ANR（>5s 卡死）** | 卡死的 main isolate 連 `addTimingsCallback` 都排不進；要監看需第二個 isolate 當 watchdog，超出「單 isolate 純觀測 + 極輕相依」範疇（§P20 只能觀測「慢幀」不能觀測「完全卡死」） |
+
+### 第七部分優先順序建議
+
+1. **§P21 記憶體壓力**（trivial、強化既有、零風險）→ 暖身首選
+2. **§P20 掉幀維度**（旗艦、對齊 Core Vital、鏈推斷價值最高）→ 但需把 timestamp 地雷釘死在計畫
+3. **§P22 權限** / **§P23 crash 鏈快照** → 依需要，兩者 API surface 都待再確認是否值得暴露
+
+> 各項寫入路徑：§P20 新增 `lib/src/models/jank_entry.dart` + `lib/src/inspectors/jank_inspector.dart` + 動 `inspector_registry.dart`/`flutter_inspector.dart`/`console_tab.dart`；§P21/§P22/§P23 皆強化既有維度，不新增檔案。
+
+---
+
 ## ❌ 拒絕實現的「垃圾」功能（Anti-Features）
 
 堅守「不走向微核心 / 過度工程」：
