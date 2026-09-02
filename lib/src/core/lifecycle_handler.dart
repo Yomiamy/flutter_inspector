@@ -3,7 +3,8 @@ import 'package:flutter/widgets.dart';
 import '../models/log_level.dart';
 import 'uncaught_error_handler.dart' show LogCallback;
 
-/// Records app lifecycle transitions as [LogLevel.info] log entries.
+/// Records app lifecycle transitions as [LogLevel.info] log entries, and
+/// memory pressure warnings as [LogLevel.warning] entries.
 ///
 /// Registers itself on [WidgetsBinding.instance] as an observer. Flutter keeps
 /// observers in a list, so the host app's own observers keep receiving their
@@ -55,6 +56,35 @@ class LifecycleHandler with WidgetsBindingObserver {
       debugPrintStack(
         stackTrace: s,
         label: 'inspector lifecycle log failed: $e',
+      );
+    }
+  }
+
+  /// Records the OS-reported memory pressure as a [LogLevel.warning] entry.
+  ///
+  /// This is the only OOM/LMK precursor available to Dart — the actual RSS
+  /// figure needs a platform channel — and it arrives as a discrete, timestamped
+  /// event, so it lands on the merged timeline next to the network, route and
+  /// database entries that preceded it. Warning rather than info: it is a
+  /// precursor signal, not a state transition, so it has to surface through the
+  /// existing error/warning filters instead of sinking into the info stream.
+  ///
+  /// Platform coverage: Android reports it via `onTrimMemory`, iOS via
+  /// `didReceiveMemoryWarning`. Web effectively never fires it.
+  @override
+  void didHaveMemoryPressure() {
+    try {
+      final page = topPageLabel?.call();
+      final suffix = (page == null || page.isEmpty) ? '' : ' · $page';
+      onLog('Memory pressure$suffix', level: LogLevel.warning);
+    } catch (e, s) {
+      // The binding wraps each observer in its own try-catch here (unlike the
+      // lifecycle broadcast), so this guard is not what keeps the host's
+      // observers running — it keeps a throwing `topPageLabel` from surfacing
+      // as a FlutterError the host never caused.
+      debugPrintStack(
+        stackTrace: s,
+        label: 'inspector memory pressure log failed: $e',
       );
     }
   }

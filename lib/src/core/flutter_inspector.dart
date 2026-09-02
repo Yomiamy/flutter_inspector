@@ -110,6 +110,12 @@ class FlutterInspector {
   /// - Unlike the error hooks, this observer *is* torn down: [detach] removes
   ///   it from [WidgetsBinding.instance]. Removing one observer from the
   ///   binding's list cannot affect the host's own observers.
+  /// - This flag also covers **memory pressure**: the same observer records an
+  ///   OS memory-pressure warning as a [LogLevel.warning] entry, the only
+  ///   OOM/LMK precursor Dart can see. It shares this flag rather than getting
+  ///   its own because both are callbacks on one observer with one attach/
+  ///   detach lifecycle. Android delivers it via `onTrimMemory`, iOS via
+  ///   `didReceiveMemoryWarning`; Web effectively never fires it.
   final bool captureLifecycleEvents;
 
   /// Whether to mask sensitive headers (e.g. `Authorization`, `Cookie`,
