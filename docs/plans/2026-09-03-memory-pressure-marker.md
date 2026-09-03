@@ -72,16 +72,18 @@ OS (onTrimMemory / didReceiveMemoryWarning)
 
 #### 1b. 測試（🔴 不可照抄既有 guard 測試）
 
-**規格 §5.4 的發現**：`binding.dart:1372` 的 `handleMemoryPressure()`
-**每個 observer 各自包 try-catch**（`:1376-1387`），
-而 `didChangeAppLifecycleState` 的廣播迴圈**沒有**。
+**規格 §5.4（已於 2026-09-03 修正）**：`handleMemoryPressure()` 的
+per-observer try-catch 是 **Flutter 3.44.0 才加入**的。本套件宣告
+`flutter: ">=3.10.0"`，在 3.10.0 ～ 3.41.x 該迴圈**沒有** per-observer
+try-catch，與 `didChangeAppLifecycleState` 完全同型。
 
-既有測試 `guard: onLog throws does not propagate` 靠「例外中斷廣播迴圈、
-後續 `_HostObserver` 收不到」來證明 guard 存在。
-**該手法在本路徑上驗不到東西**——即使拿掉 try-catch，binding 也會接住，
-`_HostObserver` 照樣被呼叫，測試恆綠但零驗證力。
+**正確寫法**：沿用既有 `_HostObserver` 手法（在 SDK 下限上唯一有鑑別力的斷言），
+並**同時**保留 `FlutterError` 斷言（在 3.44.0+ 上 `hostCalled` 恆為 true、
+失去鑑別力時由它接手）。兩者並存，整個支援範圍才都驗得到 guard。
 
-**正確寫法**：直接斷言「拋錯時不產生 log、且不向外拋出」。
+> 原記載為「binding 每個 observer 各自包 try-catch，故 `_HostObserver` 無效」，
+> 那只在 3.44.0+ 成立——是只查本機 SDK（3.44.1）未對照版本下限所致，
+> 由 PR #155 review 指出後逐版查證修正。
 
 新增的 case（對應驗收條件 1–7）：
 
@@ -92,7 +94,7 @@ OS (onTrimMemory / didReceiveMemoryWarning)
 | 3 | `memory pressure: null and empty label omit the suffix` | 訊息 == `Memory pressure`（兩種輸入） |
 | 4 | `memory pressure: not attached produces no log` | callCount==0 |
 | 5 | `memory pressure: no log after detach` | detach 後再觸發，callCount 不變 |
-| 6 | `memory pressure: throwing topPageLabel is caught` | `returnsNormally` 且 logged==false（**不使用 `_HostObserver`**） |
+| 6 | `memory pressure: throwing topPageLabel is caught` | `returnsNormally`、hostCalled==true（`_HostObserver`，驗 3.10–3.41）、captured 為空（`FlutterError`，驗 3.44+）、logged==false |
 
 觸發方式：`WidgetsBinding.instance.handleMemoryPressure()`（公開方法，無需 mock）。
 

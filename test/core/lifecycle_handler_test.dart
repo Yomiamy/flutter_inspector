@@ -277,41 +277,50 @@ void main() {
     expect(callCount, 1);
   });
 
-  test(
-    'memory pressure: a throwing topPageLabel never reaches FlutterError',
-    () {
-      var logged = false;
-      final h = LifecycleHandler(
-        onLog: (message, {level = LogLevel.info, stackTrace, data}) {
-          logged = true;
-        },
-        topPageLabel: () => throw StateError('resolve failed'),
-      );
-      handler = h;
-      h.attach();
+  test('memory pressure: a throwing topPageLabel is caught by the guard', () {
+    var logged = false;
+    var hostCalled = false;
+    final h = LifecycleHandler(
+      onLog: (message, {level = LogLevel.info, stackTrace, data}) {
+        logged = true;
+      },
+      topPageLabel: () => throw StateError('resolve failed'),
+    );
+    handler = h;
+    h.attach();
 
-      // 🔴 這個斷言的選擇是實測出來的，不是想當然耳：
-      //
-      // 1. 不能用上面 `guard: onLog throws` 的 _HostObserver 手法——binding 的
-      //    handleMemoryPressure() 為每個 observer 各自包了 try-catch
-      //    （didChangeAppLifecycleState 的廣播迴圈則沒有），例外不會中斷廣播。
-      // 2. 也不能只斷言 returnsNormally + 不產生 log——binding 那層 try-catch
-      //    會把例外接走，所以拿掉本類別的 guard 這兩個斷言照樣通過（已用
-      //    mutation test 證實：移除 try-catch 後 15 個測試全綠）。
-      //
-      // 唯一能分辨「guard 在不在」的可觀察差異是 FlutterError：沒有 guard 時，
-      // binding 會把例外轉成 FlutterErrorDetails 報上去；有 guard 時不會。
-      final captured = <FlutterErrorDetails>[];
-      final saved = FlutterError.onError;
-      FlutterError.onError = captured.add;
-      addTearDown(() => FlutterError.onError = saved);
+    // 🔴 斷言兩件事，因為 binding 的行為隨 SDK 版本而異：
+    //
+    // - Flutter >=3.10.0（本套件的 SDK 下限）到 3.41.x：
+    //   handleMemoryPressure() 逐一呼叫 observer，**沒有** per-observer
+    //   try-catch。例外逃逸會中斷廣播，排在本 handler 之後註冊的 observer
+    //   全部收不到——與 didChangeAppLifecycleState 完全同型，所以沿用上面
+    //   `guard: onLog throws` 的 _HostObserver 手法（註冊順序同樣刻意讓
+    //   handler 排在 hostObserver 之前）。
+    // - Flutter 3.44.0 起：binding 補上 per-observer try-catch，此時
+    //   hostCalled 不論有無 guard 都為 true，該斷言失去鑑別力；改由
+    //   FlutterError 有沒有收到回報來分辨（沒 guard 時 binding 會把例外
+    //   轉成 FlutterErrorDetails 報上去）。
+    //
+    // 兩個斷言並存，整個支援範圍內才都真的驗得到 guard 存在。
+    final hostObserver = _HostObserver(() => hostCalled = true);
+    WidgetsBinding.instance.addObserver(hostObserver);
+    addTearDown(() => WidgetsBinding.instance.removeObserver(hostObserver));
 
-      WidgetsBinding.instance.handleMemoryPressure();
+    final captured = <FlutterErrorDetails>[];
+    final saved = FlutterError.onError;
+    FlutterError.onError = captured.add;
+    addTearDown(() => FlutterError.onError = saved);
 
-      expect(captured, isEmpty);
-      expect(logged, isFalse);
-    },
-  );
+    expect(
+      () => WidgetsBinding.instance.handleMemoryPressure(),
+      returnsNormally,
+    );
+
+    expect(hostCalled, isTrue);
+    expect(captured, isEmpty);
+    expect(logged, isFalse);
+  });
 
   test('topPageLabel: a throwing supplier is caught, does not propagate', () {
     var logged = false;
@@ -338,6 +347,10 @@ void main() {
 
 /// Minimal host observer, proving [LifecycleHandler] never crowds out the
 /// other observers registered on the binding.
+///
+/// Both callbacks report through the same hook: each test registers this after
+/// the handler and triggers only one of the two broadcasts, so whichever fires
+/// is the one under test.
 class _HostObserver with WidgetsBindingObserver {
   _HostObserver(this.onStateChange);
 
@@ -345,6 +358,11 @@ class _HostObserver with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    onStateChange();
+  }
+
+  @override
+  void didHaveMemoryPressure() {
     onStateChange();
   }
 }

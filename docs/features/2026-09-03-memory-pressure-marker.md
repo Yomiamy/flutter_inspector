@@ -99,18 +99,24 @@ Google Play 2026 Q3「Elevating app quality」把 Memory usage（RSS+Swap / Bitm
 3. **`activeRoute` 已自動帶上**：`FlutterInspector.log` 於 `:311` 自行呼叫 `_currentTopPageLabel()` 填入 `activeRoute` 欄位。
    `topPageLabel` 尾巴是**訊息文字**的一部分（給人讀），與 `activeRoute` 欄位（給機器用）兩者並存，對齊既有生命週期事件的作法。
 
-4. **🔴 錯誤傳播路徑與生命週期不同（本次新發現，修正先前假設）**：
-   `binding.dart:1372` 的 `handleMemoryPressure()` **每個 observer 各自包在 try-catch 內**
-   （`:1376-1387`，捕捉後走 `FlutterError.reportError`），
-   而 `didChangeAppLifecycleState` 的廣播迴圈**沒有** per-observer try-catch。
+4. **🔴 錯誤傳播行為隨 SDK 版本而異（2026-09-03 PR review 後修正，見下方勘誤）**：
+   `handleMemoryPressure()` 的 per-observer try-catch 是 **Flutter 3.44.0 才加入的**。
+   本套件 `pubspec.yaml` 宣告 `flutter: ">=3.10.0"`，
+   **在 3.10.0 ～ 3.41.x（即絕大多數支援版本）該迴圈沒有 per-observer try-catch**，
+   與 `didChangeAppLifecycleState` 完全同型——例外逃逸會中斷廣播，
+   排在本 handler 之後註冊的 observer 全部收不到。
 
-   **影響**：既有測試 `guard: onLog throws does not propagate` 依賴「例外會中斷廣播迴圈」來證明 guard 存在
-   （測試檔 `:133-135` 有註解特別說明註冊順序的用意）。
-   **該手法在記憶體壓力路徑上無效**——即使不加 try-catch，binding 也會接住，後續 observer 照樣被呼叫。
+   **結論**：本項的 try-catch **是真正的保護**（不只是避免汙染 `FlutterError`），
+   且測試**應該**沿用既有 `_HostObserver` 手法——那才是在 SDK 下限上唯一有鑑別力的斷言。
+   同時保留 `FlutterError` 斷言，因為在 3.44.0+ 上 `hostCalled` 會恆為 true、失去鑑別力。
+   兩個斷言並存，整個支援範圍內才都驗得到 guard。
 
-   **結論**：本項**仍要加自己的 try-catch**（理由是不讓 host 的 `topPageLabel` 拋錯汙染 `FlutterError`，
-   且與既有 callback 保持一致寫法），但**測試不可照抄 `_HostObserver` 那套驗法**，
-   應改為直接斷言「拋錯時不產生 log 且不拋出」。
+   > **勘誤**：本節原記載「`handleMemoryPressure()` 每個 observer 各自包 try-catch，
+   > 故 `_HostObserver` 手法無效」。該結論**只在 Flutter 3.44.0+ 成立**，
+   > 是我只查了本機 SDK（3.44.1）就下的定論，未對照 `pubspec.yaml` 宣告的版本下限。
+   > 由 PR #155 的 CodeRabbit review 指出，經逐版查證 upstream `binding.dart` 確認：
+   > 3.10.0 / 3.16 / 3.19 / 3.22 / 3.24 / 3.27 / 3.29 / 3.32 / 3.35 / 3.38 / 3.41 皆無，
+   > 3.44.0 起才有。**教訓：驗證 SDK 行為時，基準是 `pubspec.yaml` 的版本下限，不是本機裝的版本。**
 
 5. **測試觸發點**：`WidgetsBinding.instance.handleMemoryPressure()` 為公開方法，可直接於測試呼叫，
    不需要 platform channel mock。

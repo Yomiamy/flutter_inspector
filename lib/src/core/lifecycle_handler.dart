@@ -79,10 +79,12 @@ class LifecycleHandler with WidgetsBindingObserver {
       final suffix = (page == null || page.isEmpty) ? '' : ' · $page';
       onLog('Memory pressure$suffix', level: LogLevel.warning);
     } catch (e, s) {
-      // The binding wraps each observer in its own try-catch here (unlike the
-      // lifecycle broadcast), so this guard is not what keeps the host's
-      // observers running — it keeps a throwing `topPageLabel` from surfacing
-      // as a FlutterError the host never caused.
+      // Same contract as the lifecycle callback above: on the SDK floor this
+      // package supports (Flutter >=3.10.0), `handleMemoryPressure` walks the
+      // observer list with no per-observer try-catch, so an escaping exception
+      // would halt the broadcast and rob every observer registered after this
+      // one. Flutter 3.44.0 added a per-observer guard there, but relying on it
+      // would break every supported version below that.
       debugPrintStack(
         stackTrace: s,
         label: 'inspector memory pressure log failed: $e',
