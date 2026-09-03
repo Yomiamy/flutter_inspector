@@ -3,6 +3,7 @@
 > **建立日期**：2026-06-25（原始檔名）
 >
 > **📝 更新紀錄 (Changelog)**：
+> * **2026-09-04**：**§P21 記憶體壓力事件完成**——PR #155 合入 main（issue #154）。落地形式與原提案的差異只有一處：原本「二擇一待定」的旗標選擇**已裁決併入既有 `captureLifecycleEvents`**，不新增 `captureMemoryPressure`——兩者是同一個 observer 上的 callback、共用同一組 attach/detach，拆兩個旗標只是多一個特殊情況。其餘照提案落地：`LifecycleHandler` 多覆寫一個 `didHaveMemoryPressure()`，記為 `LogLevel.warning`（非 info——這是 OOM/LMK 前導信號，必須能被既有 warning/error 過濾撈起來，不能沉在資訊流裡），沿用既有 `topPageLabel` 後綴，零新增 Entry/Inspector/RingBuffer、零新相依。callback 內以 try-catch 包住：本套件 SDK 下限（Flutter >=3.10.0）的 `handleMemoryPressure()` 逐一走訪 observer 且**無** per-observer try-catch（per-observer 保護是 3.44.0 才加入），逸出的例外會中斷廣播、波及排在後面的每個 observer。`example/` 另補一顆 `Simulate Memory Pressure` 按鈕（走 `WidgetsBinding.instance.handleMemoryPressure()`，與 OS 真實回報同一條 observer 廣播路徑）。檔名日期前綴由 `2026-09-01` 更新至 `2026-09-04`。
 > * **2026-08-28**：**新增第六部分：開源除錯與日誌生態套件全面評估與整合策略**——針對社群主流除錯與日誌套件（涵蓋 talker_flutter, logger, alice/chucker_flutter, flutter_mxlogger, logging, logarte, stack_trace, flutter_ume, catcher 等 20+ 套件）進行 4 大維度深度評估（架構相容性、輕量與效能、UI/UX 視覺呈現、社群活力與穩定度）。以 Linus 模式核心判斷「拒絕重型黑盒全家桶替換核心、嚴守 Anti-Features（拒絕本機落盤與強依賴注入）」，並提出 4 項高 ROI、零新相依的務實整合提案（§P16 生態適配器 LogOutput/TalkerObserver、§P17 原生折疊 JSON 樹狀檢視器、§P18 輕量網路效能統計條、§P19 StackTrace 非同步鏈正規化）。
 > * **2026-08-22**：**§P15 鍵值儲存檢視器完成**——PR #137 合入 main（issue #136）。落地形式與原提案有一處關鍵差異：**實作為獨立 Storage tab，非併入 Database Tab**（理由：區分儲存引擎本身是 RD 需要的排查訊號）。該改動連帶消滅了「兩類 source 共存於同一 dropdown」的型別難題——`database_tab.dart` 最終一行未改。稽核 log 的值預設遮蔽（會經 `buildLogPlainText` 進剪貼簿與分享，而 KV source 可能是 secure storage）。Tier 4 剩 3 項（§P4 / §D4 / §P9）。檔名日期前綴由 `2026-08-14` 更新至 `2026-08-22`。
 > * **2026-08-14**：**新增 §P15 鍵值儲存檢視器（Key-Value / SharedPreferences Browser）**——針對 QA 與開發者排查 Token 過期、快取污染與 Feature Flag 異常痛點，提出基於 `KeyValueBrowserSource` 的 host-injection 介面與 Database Tab 整合方案（支援搜尋、即時編輯、刪除與清空操作，零新相依且寫入操作自動記 log 追蹤）。排入 Tier 4（最高排查價值項）。
@@ -24,7 +25,7 @@
 
 ---
 
-## 📊 完成度總覽（截至 2026-09-01 · v2.4.0）
+## 📊 完成度總覽（截至 2026-09-04 · v2.4.0）
 
 > 以下狀態依實際 codebase 與 git history 核對標注。✅ 完成 ｜ 🟡 部分完成 ｜ ⬜ 未實作。
 >
@@ -1069,12 +1070,12 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
 * **次要**：Web 平台 `FrameTiming` 上報不完整，需明講降級（不 crash 但「四平台一致」在 Web 打折）；`TimelineSource` enum 加 jank 要同步 `mergedTimeline` / console_tab filter chip 三處。
 * **Effort**：low~medium ｜ **排查價值**：⭐⭐⭐⭐⭐（對齊 Core Vital，鏈推斷價值最高）
 
-### §P21. 記憶體壓力事件（`captureMemoryPressure`）— 🆕 最省
+### §P21. 記憶體壓力事件（併入 `captureLifecycleEvents`）— ✅ 已完成（PR #155）
 
 * **痛點**：Memory usage（RSS+Swap / Bitmap）Feb 2027 強制。真正的 RSS 數值需 platform channel（粗糙且跨平台不一），但 **OOM/LMK 前的「記憶體壓力」是 Dart 層唯一拿得到的前導信號**。
 * **好品味設計**：
   > `WidgetsBindingObserver.didHaveMemoryPressure()` 是 Flutter SDK 內建回呼，而 kit 的 `LifecycleHandler` 已經是 observer——**多接一個 callback 即可**，寫進既有 log／lifecycle 時間軸，不新增 Entry/Inspector/RingBuffer。
-* **公開 API**：`bool captureMemoryPressure = false`（或直接併入既有 `captureLifecycleEvents`——記憶體壓力與前景/背景切換同屬「生命週期觀測」語意，共用同一個 `WidgetsBindingObserver`）。二擇一待定。
+* **公開 API**：**已裁決併入既有 `captureLifecycleEvents`**，不新增 `captureMemoryPressure` 旗標——兩者是同一個 `WidgetsBindingObserver` 上的 callback、共用同一組 attach/detach 生命週期，拆兩個旗標只是多一個特殊情況。
 * **重用**：`LifecycleHandler` 既有 observer + 既有 log 維度。零新相依。
 * **鏈推斷價值**：把 OOM 前唯一的 Dart 層前導信號插進時間軸，讓 crash 前的 memory pressure 與其之前的 network/route/db 並排，讀出「壓力密集出現在載入大圖之後」這種因果推斷。
 * **Effort**：trivial ｜ **排查價值**：⭐⭐⭐⭐（強化既有維度，零風險，建議當暖身第一項）
@@ -1109,7 +1110,7 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
 
 ### 第七部分優先順序建議
 
-1. **§P21 記憶體壓力**（trivial、強化既有、零風險）→ 暖身首選
+1. ~~**§P21 記憶體壓力**（trivial、強化既有、零風險）→ 暖身首選~~ → **✅ 已完成（PR #155）**
 2. **§P20 掉幀維度**（旗艦、對齊 Core Vital、鏈推斷價值最高）→ **⚠️ 目前為「待裁決」而非待辦**：與 Anti-Feature #1（2026-08-14 覆核）否決的變體同源，需先解決 debug build 誤報爭議；若裁決通過，另需把 timestamp 地雷釘死在計畫
 3. **§P22 權限** / **§P23 crash 鏈快照** → 依需要，兩者 API surface 都待再確認是否值得暴露
 

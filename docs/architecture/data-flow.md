@@ -196,6 +196,8 @@
 
 ## 5. App 生命週期標記流程 (Lifecycle Marker Flow)
 
+> 本節同時涵蓋**記憶體壓力事件**——它由同一個 observer、同一個 `captureLifecycleEvents` 旗標驅動，走下圖完全相同的路徑，差異見〈關鍵細節〉第 5 點。
+
 當配置 `captureLifecycleEvents: true` 時，套件把 app 前景/背景切換記成一條 `LogLevel.info` log——**多一個事件來源，不是多一個系統**。每筆 log 尾巴附加當下的 top-most page，讓 home/back 頻繁切換時仍能在 Console 一眼分辨發生在哪一頁，免去跳 Navigator tab 對時間戳。
 
 ```text
@@ -239,6 +241,7 @@
 2. **top-page 是 best-effort，推不出來就省略**：來源 `NavigatorStackResolver` 是純函式重播，會因 observer 掛載前導航 / buffer 淘汰 / nested Navigator 而失準。**推不出來時省略尾巴而非猜測**——不讓讀者把推導值當事實（避開 §P2「錯誤上下文快照」被否決的同一個坑）。
 3. **只取型態 + path，`data` 維持 `null`**：`displayName`（優先 `widgetType`）+ `routeName`，不帶 `arguments`（PII / 大量資料風險）。資訊放 message 供肉眼辨識，不為未來可能的程式化篩選預先開 `data` 欄位。
 4. **耦合邊界**：`LifecycleHandler` 只收 `String? Function()? topPageLabel` callback，不持有 registry/resolver；resolve 邏輯留在 `FlutterInspector`。handler 仍是「症狀記錄器」，不知道那個字串怎麼來的。
+5. **記憶體壓力走同一條路（PR #155）**：同一旗標下 `didHaveMemoryPressure()` 走上圖**完全相同**的流程——同一個 observer、同樣的 top-page 索取與 best-effort 省略、同樣寫進 `LogInspector` RingBuffer，只有兩處不同：訊息為 `Memory pressure{· page}`，且 level 是 **`LogLevel.warning` 而非 info**（OOM/LMK 前導信號要能被既有 warning/error 過濾撈起來，不能沉在資訊流裡）。它是 Dart 層唯一拿得到的 OOM 前導信號，因此進時間軸的價值在於與其前面的 network/route/db 事件並排讀出因果。平台覆蓋：Android 走 `onTrimMemory`、iOS 走 `didReceiveMemoryWarning`，Web 實質不觸發。
 
 ---
 
