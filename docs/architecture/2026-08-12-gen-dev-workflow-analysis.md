@@ -1,6 +1,7 @@
 # gen-dev-workflow 全階段分析報告
 
 > **📝 更新紀錄 (Changelog)**：
+> * **2026-09-04**：補上三處文件從未涵蓋的既有機制，並更新兩項因此失效的判斷。(1) 新增「Hook 強制層」章節——四個已註冊 hook（`wf-guard-stage-check`、`wf-guard-delegate-cwd` pre/post、`cbm-reindex-on-pr`）此前在本文件 0 次提及，其中兩個直接強制本 workflow 自身的規則；(2) 新增 batch 批次模式（此前僅 quick 模式有專節）；(3) 新增「Claude Workflow 編排」可選加速層。連帶修正：「委派後端依賴」缺點中「工作目錄靠 prompt 約束，屬文件層自律而非程式強制」一句已被 `wf-guard-delegate-cwd` 推翻，改為「pre 端已程式強制」；「最危險的假設」補上 hook 層作為第二道非自律防線。新增流程總覽圖連結。
 > * **2026-08-12**：PR review 回應階段的一致性修正（PR #126）。四處敘述本身自相矛盾，非新增功能：(1) STAGE 2 驗收責任人在 `implementer.md`、SKILL.md、本文件三處定義不一，統一為「委派 verifier 做兩階段驗收、implementer 只複核」；(2) STAGE 6 清理執行模型在本文件表格、mermaid 圖 E6/F6、SKILL.md 摘要表之間矛盾，統一為「主對話執行、不委派」；(3) `publisher.md` 唯讀派發同時宣稱「不得跨出目錄」又說明會讀全域 CLAUDE.md，改為誠實描述限制；(4) `brancher.md` 重試對帳規則原寫「找到既有資源就復用」，與 `ticket-id-dev-prep`「已存在則停止回報」衝突，收緊為「僅復用能證明屬於本次嘗試的資源」。
 > * **2026-08-10**：**委派後端由 `agy -p` headless 改為 `gemini-mcp-tool`（MCP）**。底層後端不變（仍是 antigravity-cli），換掉的是傳輸層——`agy -p` 不吃 stdin、權限卡死，委派實際一律落到 fallback；MCP 路徑實測可寫檔、可跑 shell、可 `git commit`。同步更新各 stage 委派欄、Model 策略、缺點表「agy 依賴」項，新增 MCP 路徑的三條委派紀律與已知限制。
 > * **2026-08-06**：同步 SKILL.md 變更——STAGE 6 新增「文件同步」前置步驟（gen-sync-docs-by-branchs → gen-commit），確保 worktree 清理前 docs 已反映分支最終狀態。更新 STAGE 6 表格、委派規則、優缺點分析。
@@ -12,8 +13,8 @@
 > 📊 **視覺化總覽**：[`2026-09-04-gen-dev-workflow-flow.html`](2026-09-04-gen-dev-workflow-flow.html)（同目錄，瀏覽器開啟）——一張圖涵蓋主路徑、sub-agent 的 model/effort、MCP 委派點與 hook 攔檢層。本文件是文字分析，該圖是流程總覽，兩者互補。
 
 `gen-dev-workflow` 是一個**全自動開發流程編排器**，從使用者說「幫我做 X 功能」到 PR 建立，共 6 個 stage（0a → 0b → 1 → 2 → 3 → 4），外加兩個獨立入口的 STAGE 5（回覆 PR review）與 STAGE 6（PR 合併後清理 worktree），以及小修正用的 **quick 模式**（單暫停點快速通道，不建 worktree）。核心機制是 **Claude 做總指揮 + `gemini-mcp-tool`（MCP）做委派執行**。自 STAGE 1 起，整條流程搬進一個獨立 worktree 執行——worktree 才是真正的隔離邊界。
-> **📌 委派後端的傳輸層變更（2026-08-10）**：後端一直是 antigravity-cli，但**傳輸層由 `agy -p` headless 改為 MCP 工具 `mcp__gemini-cli__ask-gemini`**。原因：`agy -p` 不吃 stdin、權限會卡死（見 [`brainstorm §2.3`](../brainstorm/2026-08-25-workflow-brainstorm.md)），委派實際一律落到 fallback，「委派」名存實亡。MCP 路徑經實測可寫檔、可改既有檔、可跑 shell 與 `git commit`，是同一後端唯一能真正委派的通道。
 
+> **📌 委派後端的傳輸層變更（2026-08-10）**：後端一直是 antigravity-cli，但**傳輸層由 `agy -p` headless 改為 MCP 工具 `mcp__gemini-cli__ask-gemini`**。原因：`agy -p` 不吃 stdin、權限會卡死（見 [`brainstorm §2.3`](../brainstorm/2026-08-25-workflow-brainstorm.md)），委派實際一律落到 fallback，「委派」名存實亡。MCP 路徑經實測可寫檔、可改既有檔、可跑 shell 與 `git commit`，是同一後端唯一能真正委派的通道。
 >
 > **MCP 路徑的三條紀律**（因 MCP 無法指定 cwd 而必要）：
 > 1. **工作目錄寫死在 prompt**——不寫絕對路徑，子進程可能在主 repo 而非 worktree 動手。
@@ -230,7 +231,6 @@ Model 別名**綁在各 agent 檔 frontmatter**（`.claude/agents/*.md`，用 `o
 
 ---
 
-## Model 與委派策略總覽
 ### Batch 模式：多需求依序執行（佇列，非 mode）
 
 | 項目 | 內容 |
@@ -270,6 +270,7 @@ Model 別名**綁在各 agent 檔 frontmatter**（`.claude/agents/*.md`，用 `o
 
 ---
 
+## Model 與委派策略總覽
 
 Model 別名綁在各 agent 檔的 frontmatter（`.claude/agents/*.md`），而 **effort 參數則在任務派發時顯式帶入**。
 
@@ -315,6 +316,16 @@ graph LR
         F2["< 50 行小修"]
         G2["commit message"]
     end
+
+    subgraph "Hook 強制層（非自律）"
+        H1["wf-guard-delegate-cwd<br/>pre: exit 2 阻擋"]
+        H2["wf-guard-stage-check<br/>未進 5 派 responder → 攔"]
+        H3["cbm-reindex-on-pr<br/>PostToolUse(Bash)"]
+    end
+
+    B2 -.被攔檢.-> H1
+    C2 -.被攔檢.-> H1
+    E2 -.被攔檢.-> H1
 ```
 
 ### STAGE 6 委派規則
@@ -324,6 +335,31 @@ graph LR
 - commit message（直接依 diff 生成，省一次 context 來回）
 - 單一檔案 < 50 行的小修正
 - STAGE 3 審查報告（reviewer 親自判斷）
+
+---
+
+## Hook 強制層（程式化防線，非 LLM 自律）
+
+除了 `wf-state.sh` 的狀態機棘輪之外，本流程還有第二道**不依賴 LLM 自律**的防線：註冊於 `.claude/settings.local.json` 的 hook。它們由 harness 在工具呼叫前後執行，LLM 無法繞過或「忘記呼叫」。
+
+> **掛載位置是本地設定（`settings.local.json`），不進版控**——換機器或重裝需重新掛載，這本身是個殘餘風險。
+
+| Hook | 事件 / matcher | 行為 | 阻擋力 |
+|---|---|---|---|
+| `wf-guard-stage-check.sh` | `PreToolUse` / `Agent` | 偵測派發 `responder` agent 時，若 state 檔的 stage 不是 5 → 阻擋 | 🔴 **exit 2 阻擋** |
+| `wf-guard-delegate-cwd.sh pre` | `PreToolUse` / `mcp__gemini-cli__ask-gemini` | 檢查派發 prompt 是否含目標 worktree 絕對路徑，缺失／不符 → 阻擋；放行時順手存下主 repo 與其他 worktree 的 git status 快照 | 🔴 **exit 2 阻擋** |
+| `wf-guard-delegate-cwd.sh post` | `PostToolUse` / `mcp__gemini-cli__ask-gemini` | 讀 pre 端快照做 before/after 差集，偵測目標 worktree 以外的實際寫入與新增 commit | 🟡 **只告警**（動作已完成，回捲無意義） |
+| `cbm-reindex-on-pr.sh` | `PostToolUse` / `Bash` | 以 shlex tokenize 判斷是否為 `gh pr create` / `git push` / `git pull`，是則背景重建 codebase-memory 索引 | — （不阻擋） |
+
+**設計要點：**
+
+- **`exit 2` 是唯一有阻擋力的離開碼**——`PreToolUse` 的 `exit 1` 屬 non-blocking error，動作照跑。兩個 guard hook 的原始碼都留有這條註解（`wf-guard-delegate-cwd.sh:290` 標為「BUG-1 教訓」），是踩過坑後的修正。
+- **這補上了 MCP 委派紀律第 1 條的程式強制**。「工作目錄寫死在 prompt」原本只是寫給另一個 LLM 看的道德勸說（Guide），`wf-guard-delegate-cwd` 的 pre 端把它變成確定性檢查（Sensor）——缺絕對路徑就進不去。
+- **偵測範圍有邊界**：post 端建立在 `git status` 之上，只涵蓋主 repo 與已知 git worktree。寫入非 git 目錄（其他專案、家目錄普通檔案）偵測不到——涵蓋那些需要 fs-level 觀察，成本遠超本問題嚴重度，屬另案。
+- **False positive 防護**：兩個 guard 都有多層放行條件（非目標工具、無 state 檔、branch 對不上、stage 不符、不在 worktree 中、路徑命中白名單），任一命中即 `exit 0`。設計上偏向「寧可漏擋也不誤擋」。
+- `cbm-reindex-on-pr.sh` 用 token 化而非正則比對，所以 `git commit -m "add push button"` 的 subcommand 是 `commit`，引號內的 push 不會誤觸發。
+
+> **⚠️ 與委派通道的耦合**：兩個 delegate guard 的 matcher 寫死 `mcp__gemini-cli__ask-gemini`。若日後再換委派傳輸層（如同 2026-08-10 從 `agy -p` 換到 MCP），**這兩個 hook 會靜默失效**——不報錯，只是不再攔截。同理 `cbm-reindex-on-pr.sh` 掛在 `Bash` 上，若 GitHub 操作改走 MCP 工具，索引就不再更新。換通道時必須同步檢查 hook matcher。
 
 ---
 
@@ -396,7 +432,7 @@ STAGE 1 之後的 state 檔存在**各自 worktree 內部**，不再是主 repo 
 |------|------|--------|------|
 | **過度工程** | ~~小功能走全流程太重~~ | ✅ 已解決 | quick 模式已補上逃生艙：小修正走「branch → 直改 → reviewer 快掃 → PR」單暫停點通道。殘餘風險：「是否屬於小修正」的判斷仍靠 LLM 自律，quick 被拿來跑大功能時只有「中途升級轉完整流程」這條軟性防線 |
 | **暫停點過多** | ~~Human-in-the-loop 頻率太高~~ | ✅ 已解決 | `pause_level` 已於 2026-08-06（`9bce068`）落地，暫停頻率成為可選粒度：`strict`（預設，維持原本 6 個固定暫停點 + STAGE 2 逐任務）／`balanced`（只停 `0b` 計畫確認、`2` 實作整體完成、`4` PR 發布前，STAGE 2 逐任務暫停全關）／`autonomous`（全不停）。判定收斂於 `wf-state.sh:141` `should_pause()` 單一來源，`stage-done`/`task-done` 兩處呼叫；欄位缺失或值異常一律退回 `strict`，壞掉的方向偏向多停一次。詳見 SKILL.md:197-211。**殘餘風險**：`autonomous` 會讓 `gh pr create` 不經過目就執行，故 SKILL.md:211 明列除非使用者要求無人值守，否則優先建議 `balanced` |
-| **委派後端依賴** | ~~外部 CLI 是單點故障~~ 傳輸層已換，依賴本身仍在 | 🟡 中（原 🟡 中，性質改變） | 2026-08-10 傳輸層由 `agy -p` headless 改為 MCP（`mcp__gemini-cli__ask-gemini`），**解決的是「委派根本跑不動」**——舊路徑因 stdin/權限問題實際一律落到 fallback，orchestrator 模式形同虛設。**未解決的**：後端仍是單一外部依賴（MCP server 掛掉照樣退 fallback），且新路徑帶來兩個舊路徑沒有的缺口——(1) MCP 無法指定 cwd，工作目錄靠 prompt 寫絕對路徑約束，屬**文件層自律而非程式強制**；(2) 無 `--print-timeout` 對應機制，長任務卡住只能人為中斷 |
+| **委派後端依賴** | ~~外部 CLI 是單點故障~~ 傳輸層已換，依賴本身仍在 | 🟡 中（原 🟡 中，性質改變） | 2026-08-10 傳輸層由 `agy -p` headless 改為 MCP（`mcp__gemini-cli__ask-gemini`），**解決的是「委派根本跑不動」**——舊路徑因 stdin/權限問題實際一律落到 fallback，orchestrator 模式形同虛設。**未解決的**：後端仍是單一外部依賴（MCP server 掛掉照樣退 fallback），且新路徑帶來兩個舊路徑沒有的缺口——(1) MCP 無法指定 cwd；**此項已於 `wf-guard-delegate-cwd` 落地後大幅收斂**：pre 端檢查 prompt 含目標 worktree 絕對路徑、缺失即 `exit 2` 阻擋，已從文件層自律升級為程式強制，殘餘的是 post 端只告警不回捲、且偵測範圍限於 git worktree（見「Hook 強制層」）；(2) 無 `--print-timeout` 對應機制，長任務卡住只能人為中斷，這條**仍是純粹的文件層規避**（靠拆小任務） |
 | **Model 假設** | 綁定 Anthropic 模型族 | 🟢 低 | 已大幅收斂：版本 ID 全數移除，model/effort 綁在 agent frontmatter（別名），SKILL.md 只寫推論等級名——同代升級與跨代換代都免改。殘餘綁定：`opus`/`sonnet` 別名與 effort 參數仍是 Claude Code 專有，若換到非 Anthropic 生態，需重寫的只剩每個 agent 檔的兩行 frontmatter，等級語意（最強推論/標準/輕量）可原樣搬移 |
 | **狀態檔脆弱** | ~~JSON 手動管理無校驗~~ | ✅ 已解決 | `scripts/wf-state.sh` 成為 state 檔唯一存取入口：schema 校驗（含 `schema_version` 欄位）+ 原子寫入（tmp → jq 驗證 → mv），壞資料進不了磁碟、寫入半途中斷不留半套 state；`get` 讀取即校驗，腐壞檔立即失敗而非靜默續接 |
 | **並行複雜度** | 契約規則難以程式化驗證 | 🟡 中 | 「寫入路徑不重疊」「共享資源指定唯一 owner」靠 planner 在計畫中標好——但 planner 本身是 LLM，標錯怎麼辦？沒有靜態檢查機制 |
@@ -404,6 +440,7 @@ STAGE 1 之後的 state 檔存在**各自 worktree 內部**，不再是主 repo 
 | **缺乏回滾** | 沒有 undo/rollback 機制 | 🟡 中 | STAGE 2 如果 implementer 寫了爛 code 且已 commit，STAGE 3 退回 STAGE 2 只是「重做」，不會自動 `git revert`。壞 commit 會留在歷史中 |
 | **STAGE 5/6 脫節** | 獨立入口與主流程不連貫 | 🟡 低 | STAGE 5、6 都是「獨立入口」。STAGE 5 串聯 responder → reviewer → publisher，邏輯與主流程部分重疊卻又獨立，若修改引入新 bug 沒有機制退回 STAGE 2；STAGE 6 雖已新增文件同步（gen-sync-docs-by-branchs → gen-commit）避免 docs 過期，但仍脫離主流程，靠使用者手動觸發、不自動偵測 PR 合併狀態，誤觸發（PR 未真正合併就清理）無自動防護，只靠使用者自律 |
 | **文件 vs 執行** | Skill 是文件，不是程式 | 🟡 中（原 🔴 高） | 可程式化的 guard 已從文件搬進 `scripts/wf-state.sh`：(1) state machine 實作——sequence 模式非法 stage 轉移直接 exit 1（合法路徑 0a→0b→1→2→3→4、3→2、4→done 寫死在轉移表；quick/jump 不套用轉移表，quick 升級走單向 `upgrade` 指令）；(2) 暫停點棘輪——`stage-done`/`task-done` 後未帶 `--confirmed` 的 `advance` 一律拒絕，跳過暫停點從「無聲遺忘」變成必須蓄意加旗標的可稽核動作；(3) `set` 白名單禁改 `stage`/確認旗標，防繞過。**殘餘風險**：LLM 仍可能根本不呼叫腳本（只能靠 SKILL.md 明文禁止手寫 JSON），context 用量估算依然無法程式化 |
+| **Hook 層脆弱** | 掛載點不進版控、matcher 與通道耦合 | 🟡 中 | Hook 是目前唯一不依賴 LLM 自律的防線，但自身有三個缺口：(1) 掛載於 `.claude/settings.local.json`，**本地設定不進版控**——換機器、重裝或新 clone 都不會有，且失效時無聲無息；(2) 兩個 delegate guard 的 matcher 寫死 `mcp__gemini-cli__ask-gemini`、reindex 寫死 `Bash`，**換委派傳輸層或把 GitHub 操作改走 MCP 都會讓對應 hook 靜默失效**（2026-08-10 已換過一次通道，這是真實而非假想的風險）；(3) false positive 防護以「無 state 檔即放行」為條件，等於「不寫 state 反而繞過 guard」——為避免誤擋而接受的代價 |
 | **錯誤傳播** | 早期 stage 錯誤會放大 | 🟡 中 | 如果 STAGE 0a 的功能規格就有偏差，使用者確認了（可能沒仔細看），後面所有 stage 都在錯誤基礎上工作。flow 沒有後期發現早期問題的回溯機制 |
 | **STAGE 1 斷裂** | ~~`promote` 後 `stage-done 1` 恆遭拒（Bug 1.6）~~ | ✅ 已解決 | 2026-07-30 已透過修改 SKILL.md 工作流指示 (Workaround) 解決。正常 sequence 流程如今會依序執行 `advance 0b` 與 `advance 1`，強行推進 stage 來滿足 guard 的要求，而不去改動 `promote` 共用底層腳本。詳見 [`docs/brainstorm/2026-08-25-workflow-brainstorm.md`](../brainstorm/2026-08-25-workflow-brainstorm.md) §6。 |
 | **狀態機漏洞** | ~~缺少任務完成與 STAGE 5 閉環校驗~~ | ✅ 已解決 | 2026-07-21 已在 `wf-state.sh` 補齊 `completed_tasks` 數量是否與 `total_tasks` 吻合的檢查，並於 STAGE 5 轉移表加上 `reviewer -> responder` 退回規則，防堵漏洞。（註：該校驗初版誤在頂層 `case` 分支用 `local`，一觸發即 `set -e` crash，已由「腳本脆弱性」列的 Bug 1.5 修正。） |
@@ -420,4 +457,8 @@ STAGE 1 之後的 state 檔存在**各自 worktree 內部**，不再是主 repo 
 
 **已採用之修復與背景（Bug 1.6 STAGE 1 斷裂）：** 此問題（`promote` 不推進 `stage` 導致 sequence 模式下 `stage-done 1` 遭拒）曾被視為高優先級待修項目。基於「Never break userspace」的實用主義哲學，最終選擇**修改 SKILL.md（Workaround）**，要求 AI 在 promote 後主動跑 `advance 0b --confirmed` → `advance 1 --confirmed` 來推動轉移表，而非去改動服務於多條路徑的 `promote` 底層腳本。這保證了 100% 安全且零回歸風險。曾被列為殘餘缺陷的暫停點密度（正常路徑 6 個固定暫停點、STAGE 2 逐任務線性膨脹）已由 `pause_level` 解決——2026-08-06（`9bce068`）落地，使用者可於 `init` 時或流程中途選擇 `strict`／`balanced`／`autonomous` 三級確認粒度。
 
-**最危險的假設（更新後）：** 原本是「markdown 指令 = 程式碼保證」；guard 進了 `wf-state.sh` 且腳本 bug 也修復之後，假設縮小為「LLM 會記得呼叫腳本」。我們成功將絕大多數的 LLM 自律漏洞轉移為 Code-level 的守門員，但若不主動呼叫 `wf-state.sh`，再強的防線也是形同虛設。
+**最危險的假設（更新後）：** 原本是「markdown 指令 = 程式碼保證」；guard 進了 `wf-state.sh` 且腳本 bug 也修復之後，假設縮小為「LLM 會記得呼叫腳本」。
+
+而 hook 層（見「Hook 強制層」）補上了**第二道不依賴自律的防線**——這是關鍵差異：`wf-state.sh` 要 LLM 主動呼叫才有用，hook 則由 harness 在工具呼叫前後強制執行，**LLM 不能選擇不觸發**。`wf-guard-stage-check` 擋掉「沒推進到 STAGE 5 就派 responder」，`wf-guard-delegate-cwd` 擋掉「派發 prompt 沒寫工作目錄」，兩者都不需要 LLM 配合。
+
+**殘餘的自律面：** (1) 不呼叫 `wf-state.sh` 就沒有 state 檔，而兩個 guard hook 都以「找不到 state 檔即放行」為 false positive 防護——**不寫 state 反而繞過了 guard**，這是設計上為避免誤擋而接受的代價；(2) hook 掛在不進版控的 `settings.local.json`，換機器即失效；(3) hook matcher 寫死委派通道名稱，換傳輸層會靜默失效；(4) context 用量估算依然無程式解。
