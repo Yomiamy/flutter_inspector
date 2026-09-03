@@ -67,10 +67,10 @@ OS (onTrimMemory / didReceiveMemoryWarning)
 |:---|:---|
 | `LogLevel.warning`（非 `info`） | 這是 OOM/LMK 前導信號，不是狀態轉換。要能被既有 warning/error 過濾與高亮機制撈起來，否則插進時間軸卻沉在資訊流裡 |
 | 沿用 `topPageLabel` 尾巴 | 「壓力發生在哪一頁」與 §P13 的「切換發生在哪一頁」同型，零額外成本 |
-| 保留 try-catch | `topPageLabel` 是 host 注入的 callback，會拋。雖然 binding 這條路徑會接住（見下方 1b），但不該讓 host 的錯誤汙染 `FlutterError`，且與既有 callback 寫法一致 |
+| 保留 try-catch | `topPageLabel` 是 host 注入的 callback，會拋。在 Flutter 3.10.0 ～ 3.41.x（本套件 SDK 下限所涵蓋的絕大多數版本）binding **不會**逐一捕捉 observer 例外，逃逸會中斷廣播、害後續 observer 收不到——**這是真正的保護**，不只是避免汙染 `FlutterError`（3.44.0+ 才由 binding 代為捕捉）。詳見下方 1b |
 | 類別 doc comment 同步更新 | 現有註解寫「Records app lifecycle transitions」，需擴及記憶體壓力 |
 
-#### 1b. 測試（🔴 不可照抄既有 guard 測試）
+#### 1b. 測試（🔴 guard 斷言須對照 SDK 下限，非本機版本）
 
 **規格 §5.4（已於 2026-09-03 修正）**：`handleMemoryPressure()` 的
 per-observer try-catch 是 **Flutter 3.44.0 才加入**的。本套件宣告
