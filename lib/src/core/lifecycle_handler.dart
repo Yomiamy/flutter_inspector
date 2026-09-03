@@ -3,13 +3,15 @@ import 'package:flutter/widgets.dart';
 import '../models/log_level.dart';
 import 'uncaught_error_handler.dart' show LogCallback;
 
-/// Records app lifecycle transitions as [LogLevel.info] log entries.
+/// Records app lifecycle transitions as [LogLevel.info] log entries, and
+/// memory pressure warnings as [LogLevel.warning] entries.
 ///
 /// Registers itself on [WidgetsBinding.instance] as an observer. Flutter keeps
 /// observers in a list, so the host app's own observers keep receiving their
 /// callbacks unaffected.
 class LifecycleHandler with WidgetsBindingObserver {
-  /// The function called to log a lifecycle transition.
+  /// The function called to log a lifecycle transition or a memory-pressure
+  /// event.
   final LogCallback onLog;
 
   /// Optional supplier of a label for the current top-most page, appended to
@@ -55,6 +57,37 @@ class LifecycleHandler with WidgetsBindingObserver {
       debugPrintStack(
         stackTrace: s,
         label: 'inspector lifecycle log failed: $e',
+      );
+    }
+  }
+
+  /// Records the OS-reported memory pressure as a [LogLevel.warning] entry.
+  ///
+  /// This is the only OOM/LMK precursor available to Dart — the actual RSS
+  /// figure needs a platform channel — and it arrives as a discrete, timestamped
+  /// event, so it lands on the merged timeline next to the network, route and
+  /// database entries that preceded it. Warning rather than info: it is a
+  /// precursor signal, not a state transition, so it has to surface through the
+  /// existing error/warning filters instead of sinking into the info stream.
+  ///
+  /// Platform coverage: Android reports it via `onTrimMemory`, iOS via
+  /// `didReceiveMemoryWarning`. Web effectively never fires it.
+  @override
+  void didHaveMemoryPressure() {
+    try {
+      final page = topPageLabel?.call();
+      final suffix = (page == null || page.isEmpty) ? '' : ' · $page';
+      onLog('Memory pressure$suffix', level: LogLevel.warning);
+    } catch (e, s) {
+      // Same contract as the lifecycle callback above: on the SDK floor this
+      // package supports (Flutter >=3.10.0), `handleMemoryPressure` walks the
+      // observer list with no per-observer try-catch, so an escaping exception
+      // would halt the broadcast and rob every observer registered after this
+      // one. Flutter 3.44.0 added a per-observer guard there, but relying on it
+      // would break every supported version below that.
+      debugPrintStack(
+        stackTrace: s,
+        label: 'inspector memory pressure log failed: $e',
       );
     }
   }

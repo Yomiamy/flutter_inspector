@@ -1,3 +1,8 @@
+## Unreleased
+
+### Added
+* **Memory pressure lands on the timeline**: When `captureLifecycleEvents` is enabled, an OS memory-pressure warning is now recorded as a `warning`-level Console entry (`Memory pressure · CheckoutPage`). It is the only OOM/LMK precursor Dart can observe — the real RSS figure needs a platform channel — and as a timestamped event it interleaves with the network, navigation and database entries that came before it, so "the app just disappeared" becomes "pressure began right after that 8 MB image decode". It reuses the existing lifecycle flag rather than adding its own, because both are callbacks on a single `WidgetsBindingObserver` sharing one attach/detach lifecycle. Android reports it via `onTrimMemory`, iOS via `didReceiveMemoryWarning`; Web effectively never fires it.
+
 ## 2.4.0
 
 ### Added

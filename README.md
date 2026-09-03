@@ -506,6 +506,18 @@ The page is a best-effort replay of the navigation history; when it cannot be re
 
 > The observer is registered with `WidgetsBinding.instance.addObserver`, which appends to a list — your app's own `WidgetsBindingObserver`s keep receiving their callbacks untouched.
 
+The same flag also records **memory pressure**, as a `warning`-level entry:
+
+```text
+Memory pressure · CheckoutPage
+```
+
+This is the only OOM/LMK precursor visible from Dart — the actual RSS figure needs a platform channel — and it lands on the merged Timeline like any other event, so the pressure can be read against the network responses, route pushes and database queries that preceded it. That is the question Play Console cannot answer: not *how bad* the memory usage is, but *what happened right before it*. It is a `warning` rather than an `info` precisely so it surfaces through the Console's error/warning filters instead of sinking into the info stream.
+
+It shares `captureLifecycleEvents` rather than having its own flag because both are callbacks on the same `WidgetsBindingObserver`, with one attach/detach lifecycle.
+
+> **Platform coverage**: Android delivers it via `onTrimMemory`, iOS via `didReceiveMemoryWarning`. On Web it effectively never fires — no entry appearing there is the platform's behavior, not a fault in the package.
+
 ### Track navigation
 
 Nothing to do here — routes are tracked automatically once you register `inspector.navigatorObserver` in `navigatorObservers` (see [Initialize](#initialize)). Pushes, pops, and replacements all show up in the Navigator tab.
