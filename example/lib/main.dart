@@ -196,6 +196,15 @@ class _MyHomePageState extends State<MyHomePage> {
               ),
               const SizedBox(height: 20),
               ElevatedButton(
+                // Fires the same observer broadcast the OS triggers on real
+                // memory pressure (Android onTrimMemory, iOS
+                // didReceiveMemoryWarning). With captureLifecycleEvents
+                // enabled it lands on the timeline as a warning entry.
+                onPressed: () => WidgetsBinding.instance.handleMemoryPressure(),
+                child: const Text('Simulate Memory Pressure'),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton(
                 // Throws an uncaught async error. With captureUncaughtErrors
                 // enabled it is caught by PlatformDispatcher.instance.onError and
                 // surfaces as a red error log in the Console tab — tap it to
