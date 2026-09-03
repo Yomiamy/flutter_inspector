@@ -74,7 +74,7 @@ Google Play 2026 Q3「Elevating app quality」把 Memory usage（RSS+Swap / Bitm
 |:---:|:---|:---|
 | 1 | `captureLifecycleEvents: true` 時，記憶體壓力事件產生一筆 log | 單元測試：`WidgetsBinding.instance.handleMemoryPressure()` → 斷言 log 一筆 |
 | 2 | 該 log 的 level 為 `LogLevel.warning`（非 `info`） | 單元測試斷言 level |
-| 3 | 訊息含可辨識文字，並在有 top page 時附上 ` · <page>` 尾巴 | 單元測試斷言訊息內容 |
+| 3 | 訊息含可辨識文字，並在有 top page 時附上「· page」尾巴 | 單元測試斷言訊息內容 |
 | 4 | `topPageLabel` 回傳 null／空字串時，訊息不含尾巴、不編造 | 單元測試（對齊既有 `didChangeAppLifecycleState` 的同型 case） |
 | 5 | 未 attach 時不產生 log | 單元測試 |
 | 6 | `detach()` 後不再產生 log | 單元測試 |

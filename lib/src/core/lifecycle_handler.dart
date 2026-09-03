@@ -10,7 +10,8 @@ import 'uncaught_error_handler.dart' show LogCallback;
 /// observers in a list, so the host app's own observers keep receiving their
 /// callbacks unaffected.
 class LifecycleHandler with WidgetsBindingObserver {
-  /// The function called to log a lifecycle transition.
+  /// The function called to log a lifecycle transition or a memory-pressure
+  /// event.
   final LogCallback onLog;
 
   /// Optional supplier of a label for the current top-most page, appended to

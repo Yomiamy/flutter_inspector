@@ -17,7 +17,7 @@
 
 資料流沿用既有路徑，一條線到底：
 
-```
+```text
 OS (onTrimMemory / didReceiveMemoryWarning)
   → WidgetsBinding.handleMemoryPressure()
   → LifecycleHandler.didHaveMemoryPressure()      ← 本次唯一新增的節點
