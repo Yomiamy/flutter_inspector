@@ -11,9 +11,9 @@
 
 > 📊 **視覺化總覽**：[`2026-09-04-gen-dev-workflow-flow.html`](2026-09-04-gen-dev-workflow-flow.html)（同目錄，瀏覽器開啟）——一張圖涵蓋主路徑、sub-agent 的 model/effort、MCP 委派點與 hook 攔檢層。本文件是文字分析，該圖是流程總覽，兩者互補。
 
-
 `gen-dev-workflow` 是一個**全自動開發流程編排器**，從使用者說「幫我做 X 功能」到 PR 建立，共 6 個 stage（0a → 0b → 1 → 2 → 3 → 4），外加兩個獨立入口的 STAGE 5（回覆 PR review）與 STAGE 6（PR 合併後清理 worktree），以及小修正用的 **quick 模式**（單暫停點快速通道，不建 worktree）。核心機制是 **Claude 做總指揮 + `gemini-mcp-tool`（MCP）做委派執行**。自 STAGE 1 起，整條流程搬進一個獨立 worktree 執行——worktree 才是真正的隔離邊界。
 > **📌 委派後端的傳輸層變更（2026-08-10）**：後端一直是 antigravity-cli，但**傳輸層由 `agy -p` headless 改為 MCP 工具 `mcp__gemini-cli__ask-gemini`**。原因：`agy -p` 不吃 stdin、權限會卡死（見 [`brainstorm §2.3`](../brainstorm/2026-08-25-workflow-brainstorm.md)），委派實際一律落到 fallback，「委派」名存實亡。MCP 路徑經實測可寫檔、可改既有檔、可跑 shell 與 `git commit`，是同一後端唯一能真正委派的通道。
+
 >
 > **MCP 路徑的三條紀律**（因 MCP 無法指定 cwd 而必要）：
 > 1. **工作目錄寫死在 prompt**——不寫絕對路徑，子進程可能在主 repo 而非 worktree 動手。
@@ -231,6 +231,45 @@ Model 別名**綁在各 agent 檔 frontmatter**（`.claude/agents/*.md`，用 `o
 ---
 
 ## Model 與委派策略總覽
+### Batch 模式：多需求依序執行（佇列，非 mode）
+
+| 項目 | 內容 |
+|------|------|
+| **觸發** | `/gen-dev-workflow batch <項目1> <項目2> ...`、「依序做完這幾項」、「繼續批次」 |
+| **本質** | **佇列類型，不是 mode**——批次的每一項各自跑完整的 `sequence` 流程（各自 worktree / branch / PR） |
+| **狀態** | `.batch-<id>.json`（存原 repo 的 `.claude/workflow-state/`），與各項自己的 state 檔分離 |
+| **指令** | `batch-init` → `batch-next` → `batch-done` / `batch-fail` → `batch-abort` |
+| **關鍵限制** | **每項之間需使用者 `/clear` 換新 context**，再說「繼續批次」接下一項 |
+
+**設計要點：**
+
+- **`pause_level` 與批次佇列是正交的兩個控制粒度**——前者決定「每個 stage 跑完要不要問」，後者決定「有幾項要跑」。`batch-init` 可帶 `--pause-level balanced` 一次設定全批。
+- **一項失敗不中止整個批次**：某項失敗（STAGE 3 連續退回、tier 升級後仍失敗）→ `batch-fail --note "<原因>"`，游標照常前進。各項獨立，沒有理由讓後面的陪葬；最終總結列出失敗項讓使用者決定要不要重跑。
+- **`cd` 紀律**：每項跑完必須 `cd` 回原 repo 再收尾，否則下一項的 `batch-next` 會在錯誤的工作目錄找不到批次檔。這是批次模式特有的踩雷點。
+- **中止**：`batch-abort` 只刪批次檔，**已建立的 branch / PR / worktree 一律保留**（沿用「branch 永不自動刪除」的既有紀律）。
+- `batch-next` 回傳 `DONE` 後才刪批次檔，並輸出總結表（項目 / status / PR 連結 / 失敗原因）。
+
+> **為何需要 `/clear`**：批次的價值在於「一次交代多個需求」，但每項跑完整流程都會累積大量 context。不 clear 就接著跑第二項，等於把 Token Budget Gate 的問題乘上項數。這是刻意的人工介入點，不是缺陷。
+
+---
+
+## Claude Workflow 編排（可選加速層）
+
+流程中**特定的並行、唯讀或路徑不重疊、且該段落內部不需要問使用者**的環節，可改用 Claude `Workflow` 工具（JS 腳本 fan-out 多 subagent）執行，取代逐個 `Task(...)` 串接。
+
+**適用點只有三處**：STAGE 0a 雙線 context 收集、STAGE 2 同批獨立任務、STAGE 3 多 angle 對抗式審查。
+
+| 邊界 | 規則 |
+|---|---|
+| **前置條件** | 使用者需明確 opt-in（說「ultracode」「用 workflow」「多 agent」或類似）。未 opt-in → 三處一律退回原本的 `Task(...)` / 序列作法，功能完全相同，只是不 fan-out |
+| **絕對禁止** | **不可把整條 orchestrator 包成單一 Workflow 腳本**——Workflow 背景執行、跑完才回，中途無法暫停問人，會直接摧毀本流程的所有暫停確認點 |
+| **暫停點歸屬** | Workflow 只用於**單一段落內部**的 fan-out，暫停點永遠由主對話掌控、落在任何 Workflow 呼叫的外面。一個 Workflow 呼叫 = 一段不可中斷的並行 |
+| **不變的部分** | state 檔、model 策略、委派規則完全不變——Workflow 只換「並行執行的載體」，不換流程語意 |
+
+> STAGE 3 的多 angle 對抗式審查是這裡唯一會影響品質判斷的適用點：平行 verifier 只負責**找 bug 作為輸入**，reviewer 仍親自收斂判斷並產出報告——與「STAGE 3 審查報告不可委派」的硬規則不衝突。
+
+---
+
 
 Model 別名綁在各 agent 檔的 frontmatter（`.claude/agents/*.md`），而 **effort 參數則在任務派發時顯式帶入**。
 
