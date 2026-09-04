@@ -3,6 +3,7 @@
 > **建立日期**：2026-06-25（原始檔名）
 >
 > **📝 更新紀錄 (Changelog)**：
+> * **2026-09-04**：**官方 `dart-lang/leak_tracker` 深度評估與架構裁決**——針對官方記憶體洩漏分析套件深入研究其運作機制（Flutter `MemoryAllocations`、`Finalizer`、`WeakReference`、`reachabilityBarrier`、`vm_service`）、執行時期代價（`forceGC` 之激進記憶體分配造成的嚴重 Jank、定時輪詢與堆疊捕獲開銷）及跨平台限制（Web/WASM 下 Retaining Path 為 null、無法建立 VM Service WebSocket、`reachabilityBarrier` 不可用）。從 Linus 模式五層分解進行裁決，確立「堅決拒絕 Direct In-App 內建整合」的鐵律，更新第 2 節矩陣評分，增補第 3 節「核心決策三：拒絕 In-App 記憶體洩漏追蹤」，並提供純記錄導向之可選適配（Adapter/Recipe）規範。
 > * **2026-09-04**：**§P21 記憶體壓力事件完成**——PR #155 合入 main（issue #154）。落地形式與原提案的差異只有一處：原本「二擇一待定」的旗標選擇**已裁決併入既有 `captureLifecycleEvents`**，不新增 `captureMemoryPressure`——兩者是同一個 observer 上的 callback、共用同一組 attach/detach，拆兩個旗標只是多一個特殊情況。其餘照提案落地：`LifecycleHandler` 多覆寫一個 `didHaveMemoryPressure()`，記為 `LogLevel.warning`（非 info——這是 OOM/LMK 前導信號，必須能被既有 warning/error 過濾撈起來，不能沉在資訊流裡），沿用既有 `topPageLabel` 後綴，零新增 Entry/Inspector/RingBuffer、零新相依。callback 內以 try-catch 包住：本套件 SDK 下限（Flutter >=3.10.0）的 `handleMemoryPressure()` 逐一走訪 observer 且**無** per-observer try-catch（per-observer 保護是 3.44.0 才加入），逸出的例外會中斷廣播、波及排在後面的每個 observer。`example/` 另補一顆 `Simulate Memory Pressure` 按鈕（走 `WidgetsBinding.instance.handleMemoryPressure()`，與 OS 真實回報同一條 observer 廣播路徑）。檔名日期前綴由 `2026-09-01` 更新至 `2026-09-04`。
 > * **2026-08-28**：**新增第六部分：開源除錯與日誌生態套件全面評估與整合策略**——針對社群主流除錯與日誌套件（涵蓋 talker_flutter, logger, alice/chucker_flutter, flutter_mxlogger, logging, logarte, stack_trace, flutter_ume, catcher 等 20+ 套件）進行 4 大維度深度評估（架構相容性、輕量與效能、UI/UX 視覺呈現、社群活力與穩定度）。以 Linus 模式核心判斷「拒絕重型黑盒全家桶替換核心、嚴守 Anti-Features（拒絕本機落盤與強依賴注入）」，並提出 4 項高 ROI、零新相依的務實整合提案（§P16 生態適配器 LogOutput/TalkerObserver、§P17 原生折疊 JSON 樹狀檢視器、§P18 輕量網路效能統計條、§P19 StackTrace 非同步鏈正規化）。
 > * **2026-08-22**：**§P15 鍵值儲存檢視器完成**——PR #137 合入 main（issue #136）。落地形式與原提案有一處關鍵差異：**實作為獨立 Storage tab，非併入 Database Tab**（理由：區分儲存引擎本身是 RD 需要的排查訊號）。該改動連帶消滅了「兩類 source 共存於同一 dropdown」的型別難題——`database_tab.dart` 最終一行未改。稽核 log 的值預設遮蔽（會經 `buildLogPlainText` 進剪貼簿與分享，而 KV source 可能是 secure storage）。Tier 4 剩 3 項（§P4 / §D4 / §P9）。檔名日期前綴由 `2026-08-14` 更新至 `2026-08-22`。
@@ -879,7 +880,8 @@ ENTRIES: [NavigatorAction.push/NetworkDetailView, NavigatorAction.push/SizedBox]
 #### 原型六：DevTools 輔助與終端工具 (Profiler & Terminal Utilities)
 * **包含套件**：`leak_tracker`, `vm_snapshot_analysis`, `lcov_parser`, `print_color`, `rich_console`, `sprintf`, `flutter_storyboard`, `snapp_cli`, `screen_state`。
 * **深度特性剖析**：
-  - 多數為開發時期的靜態分析或終端著色工具，不屬於即時除錯 Inspector 領域。
+  - **`leak_tracker`**（Dart 官方，Likes: 168+）：由 Flutter 官方 DevTools / Memory 團隊維護之記憶體洩漏分析引擎。專注於在測試執行期（CI/CD）與開發輔助中捕捉未釋放物件（`notDisposed`）、未被回收物件（`notGCed`）與延遲回收物件（`gcedLate`）。其架構深度仰賴 Flutter 框架 `MemoryAllocations` 派發之事件、Dart `Finalizer` 與 `WeakReference`、以及 `vm_service` 之 WebSocket 連線以獲取保留路徑（Retaining Path）。在 In-App 即時排查場景下，因其激進的記憶體分配（`forceGC`）、不可忽略的幀率中斷（Jank）、以及在 Web (WASM/JS) 上完全無法取得 Retaining Path，使其無法適配為 In-App 常駐除錯工具。
+  - 其餘多數為開發時期的靜態分析、測試報告解析或終端著色工具，不屬於即時除錯 Inspector 領域。
 
 ---
 
@@ -899,7 +901,7 @@ ENTRIES: [NavigatorAction.push/NetworkDetailView, NavigatorAction.push/SizedBox]
 | **`logarte`** | 輕量日誌控制台 | 🟡 僅 Log/Network | 🟢 輕量 | 🟡 陽春 | 🟡 中 (213) | 🟡 湊合 | **不整合**；功能為本 kit 子集 |
 | **`cr_logger`** | 應用內日誌套件 | 🟡 概念重疊 | 🟡 自帶多層 UI | 🟡 非標準 M3 | 🔴 低 (48) | 🟡 湊合 | **不整合**；代碼封閉，無借鑒價值 |
 | **`loggy` / `fimber`** | 日誌框架 | 🟢 良好（純日誌流） | 🟢 輕量 | ⚪ 無 UI | 🟡 中 (127/78) | 🟡 湊合 | **提供 README 食譜**，不新增直接相依 |
-| **`leak_tracker`** | 記憶體洩漏分析 | 🔴 需 DevTools 配合 | 🟡 追蹤開銷 | ⚪ 無 UI | 🟢 官方 (168) | 🟡 湊合 | **保持獨立**；交由官方 DevTools 處理 |
+| **`leak_tracker`** | 記憶體洩漏分析 | 🔴 差（Web/WASM 斷手、綁定 VM Service 與 assert） | 🔴 差（forceGC 激進配置引發 Jank、追蹤駐留與 StackTrace 捕獲開銷大） | ⚪ 無 UI（純引擎無 In-App 界面） | 🟢 官方 (168+) | 🔴 垃圾（針對 In-App 整合） / 🟡 湊合（僅限 CI 測試） | **堅決拒絕 Direct In-App 內建**；維持外部獨立（DevTools/CI），至多以離散 Event Adapter 食譜轉入 Timeline（見 §3 核心決策三） |
 | **`leak_detector`** | 頁面洩漏偵測（Widget/Element/State） | 🔴 差（native plugin 無 Web，拖 `sqflite`）| 🔴 差（Full GC 掉幀） | 🟡 自帶洩漏鏈預覽 | 🔴 停滯 (65 · 3 年未更新) | 🔴 垃圾 | **拒絕**；破壞 WASM 且違反「零磁碟落盤」，嚴格劣於已否決的官方 `leak_tracker` |
 
 ---
@@ -929,6 +931,92 @@ ENTRIES: [NavigatorAction.push/NetworkDetailView, NavigatorAction.push/SizedBox]
   2. **版本遷移地獄**：除錯工具自身的資料庫版本若與宿主衝突，將引發難以排查的 crash。
   3. **隱私與安全暴雷**：未經 Redaction 脫敏的 Auth Token 或用戶密碼若落盤在 SQLite，在產線環境將構成嚴重的資安合規漏洞。
   4. **好品味解法**：記憶體由 `RingBuffer`（500 筆上限）鎖定上限；排查證據由 `buildDiagnosticReport`（Markdown 報告）一鍵透過系統分享帶走。**排查要的是證據，不是留在手機裡的歷史資料庫！**
+
+#### 核心決策三：拒絕 In-App 記憶體洩漏追蹤（深入剖析官方 dart-lang/leak_tracker）
+
+##### 【背景與動機】
+在社群與除錯需求討論中，常有一種聲音：「既然 `flutter_inspector` 已經有 Navigator 堆疊與生命週期追蹤，能不能像 Android 的 LeakCanary 一樣，在手機上直接抓出哪個頁面或 Controller 發生記憶體洩漏（Memory Leak）？」
+官方 `dart-lang/leak_tracker` 正是 Flutter/Dart 官方團隊主導的記憶體洩漏偵測專門庫。我們從底層機制、執行時期代價、跨平台限制到哲學定位進行全面剖析，評估其是否有資格進入 `flutter_inspector` 核心。
+
+##### 1. `leak_tracker` 核心實現機制深探
+* **Flutter 框架層 `FlutterMemoryAllocations` 的監聽與生命週期依賴**：
+  * `leak_tracker` 透過註冊 `FlutterMemoryAllocations.instance.addListener((ObjectEvent event) { LeakTracking.dispatchObjectEvent(event.toMap()); })` 監聽框架物件建立與銷毀事件。
+  * 涵蓋 `ui.Image`、`ui.Picture`、`RenderObject`、`Layer`、`PipelineOwner`、`Element`、`State`、`AnimationController`、`Ticker`、`Route`、`ChangeNotifier`。
+  * **致命限制 ①（Profile / Release 模式靜默失效）**：框架內所有調用點皆為 `assert(debugMaybeDispatchCreated(...))` 與 `assert(debugMaybeDispatchDisposed(...))`。在 Profile 與 Release 模式下，`assert` 會被編譯器完全消除；且 `kFlutterMemoryAllocationsEnabled` 預設為 `_kMemoryAllocations || kDebugMode`。在 QA 最常使用的 Profile 模式下會「靜默完全失效」，除非宿主編譯時傳入 `--dart-define=flutter.memory_allocations=true`，嚴重違反對開發者透明與零心智負擔原則。
+  * **致命限制 ②（海量事件風暴 Event Storm）**：常規頁面切換與動畫重建每秒涉及數千個 `Element`、`RenderObject`、`Layer` 的頻繁建立與釋放，每次事件派發都會遍歷 listener 清單，對 UI 執行緒的 Event Loop 形成極大負擔。
+* **物件追蹤、Finalizer、Expando 與狀態機**：
+  * **弱引用隔離（WeakReference）**：`ObjectRecord` 透過 `WeakReference<Object>(object)` 持有物件目標，並以 `identityHashCode(object)` 建立索引，避免自身持有強引用而造成偽洩漏。
+  * **GC 回收感知（Finalizer）**：使用 Dart 2.17+ 的 `Finalizer<Object>`，當物件在 VM Heap 被回收時，非同步調用 `_onObjectGarbageCollected`。
+  * **Expando vs Finalizer 邊界**：Dart 2.17 之前的 `Expando` 本質是弱鍵關聯表，無法在物件被 GC 時主動回呼，只能被動輪詢；現代 `leak_tracker` 已全面遷移至 `Finalizer`，但這帶來了對 VM 底層 GC 排程的深度依賴。
+  * **物件狀態機與三類洩漏**：
+    1. `LeakType.notDisposed`：物件被 GC 回收了，但從未調用過 `dispose()`（生命週期管理失職）。
+    2. `LeakType.notGCed`：物件已調用 `dispose()`，但經過了數次 GC 週期與時間門檻後依然存活，代表被強引用釘死在記憶體中（最嚴重的記憶體洩漏）。
+    3. `LeakType.gcedLate`：物件已調用 `dispose()`，但延遲回收。
+* **保留路徑（Retaining Path）抓取機制**：
+  * 深度依賴 `package:vm_service` 透過 `Service.controlWebServer(enable: true)` 開啟本地 WebSocket。
+  * 調用 `Service.getObjectId(object)` 與 `Service.getIsolateId(...)`。
+  * 非同步向 VM Service 發送 `service.getRetainingPath(...)`，遍歷整個 VM 堆疊對象圖。
+
+##### 2. 執行時期代價與跨平台致命傷
+* **幀率毀滅者：`forceGC` 的激進記憶體配置本質**：
+  * 正常 UI 運行時，Dart VM 可能數分鐘都不會觸發 Full GC，導致追蹤器無法判定物件是否「逾期未回收（notGCed）」。
+  * 為此，`leak_tracker` 提供了 `forceGC()`（`helpers.dart:25-48`）：在 UI isolate 上透過 while 迴圈**反覆產生長度 30,000 的整數列表（`List.generate(30000, ...)`），強行把 VM 記憶體撐爆，逼迫 VM 執行 Full GC**！
+  * 此行為在手機端會引發極端 CPU 暴衝、記憶體劇烈抖動、數百毫秒的嚴重 UI Jank / 凍結幀，甚至直接觸發 OS LMK（Low Memory Killer）使 App 崩潰。
+* **定時輪詢與堆疊捕獲開銷**：
+  * `LeakReporter` 預設以 `Timer.periodic(1s)` 輪詢所有待 GC 集合，在 Event Loop 上持續耗能。
+  * 若開啟 `collectStackTrace`，每次物件建立/銷毀皆調用 `StackTrace.current`，FPS 跌至個位數；內部 6 個非定長集合隨物件生成失控膨脹，追蹤器自身可佔用數十 MB 記憶體。
+* **跨平台死穴（Web / WASM 斷手）**：
+  * Web (JS / WASM) 環境缺乏 `reachabilityBarrier`、`Service.getObjectId`、`Service.controlWebServer`。
+  * `leak_tracker` 官方之 `_retaining_path_web.dart` 直接硬編碼：`retainingPathImpl(...) async => null;`。
+  * `forceGC()` 在 Web 與 Release 模式下官方標註完全無效。
+  * 深度綁定 `package:vm_service`，與 `flutter_inspector` 全平台（含 WASM/Web）一等公民支援原則直接衝突。
+
+##### 3. 三種整合路線的實用性與破壞性評估矩陣
+
+| 評估維度 | 路線 1：Direct In-App Integration<br>（核心內建或默認啟用） | 路線 2：Recipe / Optional Adapter<br>（文檔食譜或可選適配器） | 路線 3：Rejection / Keep External<br>（保持完全獨立，交由官方 DevTools） |
+|---|---|---|---|
+| **實作形式** | 核心相依 `leak_tracker`，監聽 `MemoryAllocations`，自建 In-App 洩漏面板 | 核心零相依，提供 `LeakTrackerAdapter` 供宿主手動將 leak 事件轉成 log | 核心零新增，明確宣告為 Anti-Feature，指引至官方 DevTools Memory |
+| **對 Userspace 影響** | 🔴 災難（UI Jank、記憶體膨脹、干擾被測 App） | 🟢 零干擾（開關完全由宿主掌控） | 🟢 零干擾（被測 App 乾淨純粹） |
+| **WASM / Web 相容** | 🔴 嚴重割裂（Web 上 Retaining Path 恆為 null） | 🟢 完全相容（僅接收字串與等級） | 🟢 完全相容 |
+| **外部相依性** | 🔴 沉重（拖入 `vm_service`, `clock` 等） | 🟢 零新相依（純介面或 README 食譜） | 🟢 零新相依 |
+| **排查因果價值** | 🔴 雜訊（滿螢幕推測性 notGCed 誤報） | 🟡 湊合（一筆帶時間戳的 warning log） | 🟢 純淨（因果鏈不被推測性分析污染） |
+| **最終評估** | ❌ **堅決否決** | 🟡 **僅作可選食譜，不進核心** | ✅ **最佳實踐與核心裁決** |
+
+##### 4. Linus 模式五層分解
+* **第 1 層：資料結構分析**：
+  * `leak_tracker` 核心由 6 個非定長集合（`notGCed`, `notGCedDisposedOk`, `notGCedDisposedLate`, `notGCedDisposedLateCollected`, `gcedLateLeaks`, `gcedNotDisposedLeaks`）管理物件生命週期，資料隨時跨集合搬移且持續膨脹。相較之下，`flutter_inspector` 的資料結構是斯巴達式的 `RingBuffer`，固定上限、O(1) 淘汰、零自體洩漏風險。
+* **第 2 層：邊界情況識別**：
+  * 「好的程式碼沒有特殊情況。」`leak_tracker` 充斥大量特殊條件補丁：官方在原始碼註釋中明言「若使用者約 5 分鐘無操作，VM 不跑 GC 就會引發 notGCed 誤報」，為此堆疊了 `numberOfGcCycles`、時間閾值、`CreationChecker` 與測試白名單。當一個機制需要 5 分鐘無操作的猜測與一堆例外補丁才能維持時，其設計已然失控。
+* **第 3 層：複雜度審查**：
+  * 這功能的本質一句話：「找出誰持有被廢棄物件的強引用」。但為此強行引入 WebSocket、VM Service RPC 通訊、Finalizer、輪詢計時器與記憶體激進分配。砍掉 Retaining Path 則失去排查診斷意義，留著則讓除錯工具膨脹為肥重 Profiler。
+* **第 4 層：破壞性分析**：
+  * 破壞 Web/WASM 一致性；破壞 Profile 模式透明性；激進記憶體分配破壞影格率甚至引發 OOM Crash。
+* **第 5 層：實用性驗證**：
+  * 手機小螢幕根本無法舒適閱讀深度保留路徑樹；真實除錯場景應連線桌面端 DevTools。In-App 排查真正需要的是 §P21 提供的 OS 級記憶體壓力前導信號（`WidgetsBindingObserver.didHaveMemoryPressure()`），而非在手機內塞入修車廠手術台。
+
+##### 5. 最終核心裁決與處置規範
+* **【核心判斷】**：❌ **堅決拒絕 Direct In-App 整合**。對齊 Anti-Feature #1（拒絕 Profiler）與 Anti-Feature #8（拒絕 Widget Tree 反射）。
+* **【關鍵洞察】**：記憶體洩漏分析是離線 Profiling 職責；In-App 偵錯器只需記錄 OOM 前導信號（§P21 `didHaveMemoryPressure()`）。
+* **【處置規範】**：
+  1. **核心零新增、零相依**：維持 `flutter_inspector` 超輕量架構，絕不引入 `leak_tracker` 或 `vm_service`。
+  2. **Anti-Features 補強**：在 Anti-Feature #1 明文增列 2026-09-04 對 In-App 記憶體洩漏分析器之否決紀錄。
+  3. **生態適配規範（可選 Adapter 食譜）**：若宿主應用在特定測試流程或自定義環境中已啟動了 `leak_tracker`，可透過以下 **5 行純轉譯食譜**，將洩漏摘要轉為一筆 `LogLevel.warning` log 併入既有 Timeline，享受因果關聯與 Markdown 報告匯出，套件本體絕不增加任何相依：
+     ```dart
+     // 宿主端可選接線食譜（零新相依）：
+     LeakTracking.start(
+       config: LeakTrackingConfig(
+         onLeaks: (LeakSummary summary) {
+           if (summary.isNotEmpty) {
+             FlutterInspector.instance.log(
+               '⚠️ Memory Leak Detected: ${summary.toMessage()}',
+               level: LogLevel.warning,
+               data: summary.toJson(),
+             );
+           }
+         },
+       ),
+     );
+     ```
 
 ---
 
@@ -1127,6 +1215,7 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
    - *拒絕*：FPS 追蹤、frame drop、記憶體 profiling 是**另一個產品維度**，不是「錯誤排查」。Flutter 官方 DevTools 已有強大的 Performance/Memory view，in-app 重造只會是低配輪子。偏離主線，effort=high，**砍**。
    - **2026-08-14 覆核，維持原判**：曾評估一個看似繞得過本條的變體——不做 profiler 面板，只用 stdlib `SchedulerBinding.addTimingsCallback` 把「單幀超標」轉成一筆離散事件併入 `mergedTimeline`（零新相依，且是 app 層級 hook，無 §P10 那種逐 widget 接線問題）。**仍然否決，死因是 debug build**：debug 無 AOT、assert 全開，`buildDuration` 系統性偏慢數倍，判定掉幀會**大量誤報**而非漏報——timeline 會被假 jank 洗版，反過來污染 Console 這條原本乾淨的排查鏈。而本 kit 是 debug-only 工具，**誤判不是邊緣情況，是唯一情況**。連官方 DevTools 都須警告「debug 效能數據不具參考性、請用 profile mode」，in-app overlay 更無立場宣稱測得準。此變體與 Anti-Feature #6（第五個 `TimelineSource` 的全鏈路成本）亦有衝突，但**不必走到那一步就已出局**。
    - **2026-09-01 交叉核對補記**：第七部分的 **§P20 掉幀/凍結幀維度**由 Google Play Core Vital 角度重新提出了**同一個設計**，且未回應本條的 debug build 誤報死因。**兩節目前互相衝突，尚未裁決**——在裁決前本條維持原判，§P20 不得逕自進入排程。詳見 §P20 節首的待裁決警示。
+   - **2026-09-04 記憶體洩漏分析（`leak_tracker`）深入評估維持原判**：深入剖析官方 `dart-lang/leak_tracker` 後，確認其核心機制（`MemoryAllocations` 依賴 assert、`forceGC` 激進記憶體配置引發嚴重 Jank、Web/WASM 下 Retaining Path 恆為 null、以及 5 分鐘無操作導致 notGCed 誤判的特殊情況打補丁）完全不符合 In-App 偵錯器定位。堅決拒絕 Direct In-App 內建整合，維持外部獨立；記憶體排查僅保留已落地的 §P21 記憶體壓力前導信號（PR #155），詳細機制與五層分解詳見第六部分 §3 核心決策三。
    - > 附帶結論（供日後看到同類套件清單時參考）：社群「Flutter 效能／崩潰分析」套件清單對本 kit **無一適用**——後端 telemetry SDK（sentry / crashlytics / newrelic / bugly …）與本 kit「資料不出裝置」的定位方向相反；FPS 小工具（statsfl / fps_monitor …）做的事十幾行 stdlib 即可取代且 `FrameTiming` 資料更完整（分得出 build 慢還是 raster 慢），但受制於上述 debug build 問題，取代了也沒用。**崩潰捕捉本 kit 已自有**（`uncaught_error_handler.dart` 三路 chain 且保留舊 handler），不需要 armor 這類「優雅恢復」——debug 階段要的是崩潰立刻現形，不是被吞掉。
 
 2. **跨 session 持久化 / 本機落盤的 crash history**
