@@ -899,6 +899,7 @@ ENTRIES: [NavigatorAction.push/NetworkDetailView, NavigatorAction.push/SizedBox]
 | **`cr_logger`** | 應用內日誌套件 | 🟡 概念重疊 | 🟡 自帶多層 UI | 🟡 非標準 M3 | 🔴 低 (48) | 🟡 湊合 | **不整合**；代碼封閉，無借鑒價值 |
 | **`loggy` / `fimber`** | 日誌框架 | 🟢 良好（純日誌流） | 🟢 輕量 | ⚪ 無 UI | 🟡 中 (127/78) | 🟡 湊合 | **提供 README 食譜**，不新增直接相依 |
 | **`leak_tracker`** | 記憶體洩漏分析 | 🔴 需 DevTools 配合 | 🟡 追蹤開銷 | ⚪ 無 UI | 🟢 官方 (168) | 🟡 湊合 | **保持獨立**；交由官方 DevTools 處理 |
+| **`leak_detector`** | 頁面洩漏偵測（Widget/Element/State） | 🔴 差（native plugin 無 Web，拖 `sqflite`）| 🔴 差（Full GC 掉幀） | 🟡 自帶洩漏鏈預覽 | 🔴 停滯 (65 · 3 年未更新) | 🔴 垃圾 | **拒絕**；破壞 WASM 且違反「零磁碟落盤」，嚴格劣於已否決的官方 `leak_tracker` |
 
 ---
 
