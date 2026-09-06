@@ -26,7 +26,7 @@ void main() {
       expect(result, contains('<-- async gap -->'));
       expect(result, contains('App.main'));
     });
-
+    
     test('does not collapse when there are 2 or less framework internals', () {
       final stackTrace = '''
 #0      MyWidget.build (package:my_app/main.dart:10:12)
