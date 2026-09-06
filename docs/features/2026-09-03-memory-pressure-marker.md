@@ -1,7 +1,7 @@
 # 功能規格：記憶體壓力事件（§P21）
 
 - **日期**：2026-09-03
-- **來源**：`docs/brainstorm/2026-09-04-features-brainstorm.md` §P21（第七部分 · Google Play 品質要求 × 執行時期排查）
+- **來源**：`docs/brainstorm/2026-09-06-features-brainstorm.md` §P21（第七部分 · Google Play 品質要求 × 執行時期排查）
 - **Tier**：Tier 4 打磨 · 第七部分優先序建議第 1 順位（暖身首選）
 - **Effort**：trivial ｜ **排查價值**：⭐⭐⭐⭐
 

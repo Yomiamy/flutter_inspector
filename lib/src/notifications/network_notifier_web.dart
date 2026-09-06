@@ -14,8 +14,25 @@ class NetworkNotifier {
   /// call sites compile unchanged; [plugin] is accepted but never used.
   NetworkNotifier({Object? plugin, AlertThrottler? throttler, this.onTap});
 
+  /// Creates a no-op crash notifier. Mirrors the native named constructor so
+  /// shared call sites compile on web.
+  NetworkNotifier.crash({
+    Object? plugin,
+    AlertThrottler? throttler,
+    this.onTap,
+  });
+
   /// Invoked when the user taps the notification. Never fires on web.
   final VoidCallback? onTap;
+
+  /// Notification id of the network summary. Mirrors the native constant so
+  /// shared code and tests can reference it on web.
+  @visibleForTesting
+  static const int networkNotificationId = 0x6E657477; // 'netw'
+
+  /// Notification id of a crash alert.
+  @visibleForTesting
+  static const int crashNotificationId = 0x63726173; // 'cras'
 
   /// Always `false`: notifications are not supported on the web build.
   bool get isAvailable => false;
@@ -25,6 +42,12 @@ class NetworkNotifier {
 
   /// No-op.
   Future<void> showOrUpdate(NetworkEntry entry, int totalCount) async {}
+
+  /// No-op.
+  Future<void> showCrash({
+    required String exceptionType,
+    required String message,
+  }) async {}
 
   /// No-op.
   Future<void> cancel() async {}

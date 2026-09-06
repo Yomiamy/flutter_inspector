@@ -26,9 +26,13 @@
 
 ---
 
-## 📊 完成度總覽（截至 2026-09-04 · v2.4.0）
+## 📊 完成度總覽（截至 2026-09-06 · v2.4.0）
 
 > 以下狀態依實際 codebase 與 git history 核對標注。✅ 完成 ｜ 🟡 部分完成 ｜ ⬜ 未實作。
+>
+> **📝 更新（2026-09-06）**：新增 **§P24 Crash 系統通知**（Issue #156，已完成），
+> 並連帶讓 **§P11 NetworkNotifier 重構**落地——§P11 原記「應與 §P1 綁定排程」，
+> 但 §P24 成為它先一步的消費者，該綁定關係已解除且前提已就緒。
 >
 > **📝 實查校正 (2026-08-06)**：對照 codebase 逐項核對 Tier 4，修正兩處與實況不符的記載——
 > * **§P8 慢請求標記**：文件原標 🆕 待辦，**實為已完成**（PR #111 / Issue #110）。
@@ -669,7 +673,15 @@ ENTRIES: [NavigatorAction.push/NetworkDetailView, NavigatorAction.push/SizedBox]
 * **Effort**：low（邏輯本身簡單）但**接線成本非零**——需要開發者手動幫可疑 widget 加 mixin，不是一個 `flag: true` 就全解決；這點要在 README 講清楚，避免被誤期待成自動偵測。
 * **排查價值**：⭐⭐⭐（見效但受眾窄：只有「懷疑某 widget 有 rebuild bug」時才會主動用）
 
-### §P11. 多告警類型重構 NetworkNotifier（§P1 的後端支撐）— 🆕
+### §P11. 多告警類型重構 NetworkNotifier（§P1 的後端支撐）— ✅ 已完成（隨 §P24 落地 · Issue #156 · 2026-09-06）
+
+> **✅ 落地更新（2026-09-06）**：本重構已隨 **§P24 Crash 系統通知**一併完成。
+> 下方「應與 §P1 綁定排程」的結論**已過時**——§P1 並非本重構的唯一消費者，
+> §P24 同樣依賴它，且先一步動工。實際落地範圍與本節設計一致：
+> `_notificationId` / `_channelId` / `_channelName` 已參數化為 `final` 實例欄位，
+> 新增 `NetworkNotifier.crash()` 具名建構式，`showOrUpdate()` 公開簽章不變、
+> 既有測試零修改（34 tests 未改動即全綠）。
+> **§P1 若日後動工，本前提已就緒，無需重做。**
 
 > **痛點**：§P1「錯誤爆發偵測」設想用既有系統通知基建做背景告警，但查核發現 `NetworkNotifier` 目前寫死「單一持續更新通知」（固定 notification id + channel）。**⚠️ 實查校正（2026-08-23）**：原句後半「`AlertThrottler` 是它的私有欄位，不是共用元件」**已過時**——`network_notifier_io.dart:19,22` 已支援建構式注入（`AlertThrottler? throttler`，預設 `?? AlertThrottler()`），`_web` 分支簽章一致，持有關係無需再動。**本項真正剩餘的缺口只有 `:31` `_notificationId` 與 `:33` `_channelId` 兩個私有常數的參數化**，effort 應由 low 下修為 trivial~low。§P1 若直接動工會被迫在 `NetworkNotifier` 內部長出 if/else 分支去區分「網路摘要」與「錯誤爆發」兩種通知語意——這正是「特殊情況」的壞味道。
 
@@ -821,7 +833,7 @@ ENTRIES: [NavigatorAction.push/NetworkDetailView, NavigatorAction.push/SizedBox]
 |:---:|------|:---:|:---:|------|
 | ~~1~~ | §P13 App 前景/背景切換標記 — ✅ **已完成（PR #100）** | low | ⭐⭐⭐⭐ | 免費疊加在既有 Timeline，性價比最高；額外附加 top-most page（型態 + path）解洗頻問題 |
 | ~~2~~ | ~~§P10 Rebuild 異常偵測~~ | ~~low（但需使用者接線）~~ | ~~⭐⭐⭐~~ | ❌ 已取消——價值太窄，opt-in per-widget 接線成本與收益不成比例 |
-| **3** | §P11 NetworkNotifier 重構 | low | ⭐⭐⭐（解鎖 §P1） | 應與 §P1 綁定排程，不單獨動工 |
+| ~~**3**~~ | ~~§P11 NetworkNotifier 重構~~ | ~~low~~ | ⭐⭐⭐（解鎖 §P1） | ✅ **已完成**（隨 §P24 落地，Issue #156）——原「與 §P1 綁定」的結論已過時，§P24 才是先動工的消費者 |
 | **4** | **§P15 鍵值儲存檢視器（KV Browser）** | medium | ⭐⭐⭐⭐⭐ | **2026-08-14 新增**。QA 排查「狀態卡住」問題的最高 ROI 工具；host-injection pattern 第四次複用，零新相依 |
 | — | ~~§P14 Breadcrumb 標記 `inspector.mark()`~~ | trivial | — | **降級不單獨排程**：與 `log()` 無功能差異，是渲染差異非資訊差異；與 §P7 綁定或直接用 emoji 約定取代（見 §P14） |
 | — | ~~§D5 Redaction 涵蓋缺口修復~~ | — | — | **不排程**：debug 工具應資訊越詳細越好，遮罩是排查絆腳石；既有實作保留不動（見 §D5） |
@@ -1185,6 +1197,24 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
 * **注意**：這必須小心不要變成被否決的「錯誤上下文快照」（§P2，固定挑幾個維度釘在 error 旁 → 預設因果單線）。正解仍是完整 `mergedTimeline`，此項頂多是「crash 時自動觸發既有匯出」，不新增快照機制。
 * **Effort**：low ｜ **排查價值**：⭐⭐⭐（待確認是否與既有診斷報告重疊）
 
+### §P24. Crash 系統通知（Crash Notification）— ✅ 已完成（Issue #156 · 2026-09-06）
+
+* **痛點**：套件僅在 API 呼叫時推送系統通知（`showNetworkNotification`），**崩潰發生時沒有任何系統層級的即時提示**。App 在背景時，QA／開發者完全不知道剛剛發生 crash；即使在前景，也得主動打開 dashboard 才會發現 error 進了 timeline。**網路異常有通知、崩潰卻沒有——這個不對稱沒有正當理由。**
+* **好品味設計（核心洞察）**：
+  > 不要新增 `CrashNotifier` 類別。那會複製一份 init／permission／平台守衛邏輯，且 `_io`/`_web` 雙分支各再多一份——四份檔案的維護成本，換一個「語意不同」的假需求。
+  >
+  > 正解是把「一則通知」的身分（id + channel）參數化，`NetworkNotifier` 就成為這個通用能力的**其中一個呼叫者**，crash 只是**換參數再建一個實例**。
+  - `_notificationId` / `_channelId` / `_channelName` 由 `static const` 改為 `final` 實例欄位，新增 `NetworkNotifier.crash()` 具名建構式（此即 §P11 重構本體）。
+  - crash 與 network 的四點差異，全部從「crash 是**離散事件**而非持續更新的摘要」這一點推導而出：獨立 id（不互相覆蓋）、獨立 channel（可分別靜音）、`ongoing: false`（可滑掉）、不執行 legacy channel 刪除（那只屬於 network）。
+* **公開 API**：建構式旗標 `bool showCrashNotification = false`（對齊既有 `showNetworkNotification` 慣例）。
+  > **刻意不自動開啟 `captureUncaughtErrors`**：安裝全域 error hook 是 host 的決定，套件不代為決定。兩者需搭配使用，已在 dartdoc 明講。
+* **重用**：三個 crash hook（`FlutterError.onError` / `PlatformDispatcher.instance.onError` / `ErrorWidget.builder`）**皆已存在**於 `uncaught_error_handler.dart`，本功能**不新增任何 hook**；`AlertThrottler` 邏輯零修改（crash 持有自己的實例，與 network 節流互不干擾）。
+* **接線點的判斷**：通知掛在 `UncaughtErrorHandler` 的 `onLog` callback，**不是** `FlutterInspector.log()`——後者是公開 API，掛在那裡會讓 host 自己的 `log(level: error)` 也跳通知，那不是「crash 通知」。
+* **自動繼承既有去重**：`UncaughtErrorHandler._lastLoggedDetails` 已處理「`FlutterError.onError` + `ErrorWidget.builder` 對同一錯誤雙擊」，通知走在 log 之後，不需另寫一套。
+* **🔴 實作教訓（條件匯出的驗證方式）**：`_io`/`_web` 簽章漂移是本次最大破壞風險（CLAUDE.md 不變式 #4），而 **`flutter test` 完全抓不到**——測試跑在 VM 上全程走 `_io`，`_web.dart` 根本不會被載入，少一個建構式也能測全綠。
+  > **且 `example/` 不能當關卡**（2026-09-06 實測）：它依賴 ObjectBox（native-only、`dart:ffi`），在該目錄跑 `flutter build web` **永遠失敗且與本功能無關**。正解是建一個只依賴本套件的最小 harness，讓兩個建構式都進編譯圖後 `flutter build web`——**編譯器擋得住，人眼擋不住**。
+* **Effort**：low（實際落地 5 任務）｜ **排查價值**：⭐⭐⭐⭐（補上網路／崩潰的通知不對稱，QA 背景測試場景剛需）
+
 ### ❌ app 內不可觀測（誠實劃界，勿浪費工）
 
 以下 Google 信號的核心部分在 Dart 執行之前、或 OS/build 層，kit **無法觀測**，不應為湊數硬做代理：
@@ -1269,7 +1299,7 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
 | 項目 | 內容 | 寫入路徑 | Effort | 狀態 |
 |------|------|----------|:---:|:---:|
 | **§P7** Error 高亮強化 | error 行淡紅底色 | `console_tab.dart` 的 `_LogEntryRow` / `_NetworkEntryRow` | trivial | ✅ PR #101 |
-| **§P11 → §P1** 錯誤爆發偵測（**綁定**） | 先重構通知 channel，再接 error 計數 + 告警 | `network_notifier.dart` → `flutter_inspector.dart` + `dashboard_modal.dart` | low + low | ⬜ 下一順位 |
+| ~~**§P11**~~ → **§P1** 錯誤爆發偵測 | ~~先重構通知 channel~~（✅ 已隨 §P24 完成），再接 error 計數 + 告警 | `flutter_inspector.dart` + `dashboard_modal.dart` | ~~low +~~ low | ⬜ 下一順位（前提已就緒） |
 | **§P6** Dashboard Badge | tab 的 error count badge | `dashboard_modal.dart` | low | ✅ `b4846ea` |
 | **§D6** Inspector 自身頁面污染 NavigatorTab | 收斂 inspector 內部 push 的識別（**方案 B**），讓 detail view 不進使用者導航軌跡 | 新增 helper + `navigator_observer.dart` + 4 處 dashboard 呼叫端 | low | ✅ 已完成 |
 
@@ -1277,7 +1307,9 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
 >
 > **§P7 已完成**（PR #101，2026-07-25 合入 main）。實際成本確如預估的 trivial，但 diff 主體不在高亮本身——動工才發現「網路請求是否失敗」的判定在三處各手寫一份且已漂移，收斂成 `NetworkEntry.isFailed` 並一併修掉 errorType-only 失敗不產生錯誤群組的既有 bug（見 §P7 實作現況）。**這是本輪的一條經驗**：trivial 項目的成本估在「要寫的程式碼」上通常準，但會低估「動到的既有判定有多少份」。
 >
-> **下一步：§P11 → §P1。§P11 必須排在 §P1 之前**，否則會被迫在 `NetworkNotifier` 內長 if/else 區分「網路摘要」與「錯誤爆發」兩種通知語意。§P14 若要做，併入 §P7 的高亮機制，不單獨排程——§P7 已完成，該機制（`_kErrorRowTint` + 逐 Row 的 `tileColor` 判斷）現已存在，屆時只需多認一種 `data` flag。
+> **📝 更新（2026-09-06）**：**§P11 已隨 §P24 Crash 系統通知完成**（Issue #156），下句的「§P11 必須排在 §P1 之前」已成既成事實——通知 id/channel 已參數化，**§P1 動工時前提已就緒**，Tier 2 剩餘工作僅 §P1 本身。
+>
+> ~~**下一步：§P11 → §P1。§P11 必須排在 §P1 之前**，否則會被迫在 `NetworkNotifier` 內長 if/else 區分「網路摘要」與「錯誤爆發」兩種通知語意。~~ §P14 若要做，併入 §P7 的高亮機制，不單獨排程——§P7 已完成，該機制（`_kErrorRowTint` + 逐 Row 的 `tileColor` 判斷）現已存在，屆時只需多認一種 `data` flag。
 
 ### Tier 3 · 檢索既有資訊（原 Phase 1，已降級）
 
