@@ -503,7 +503,7 @@ Crash notifications are independent of the [network notification](#live-notifica
 Unlike the ongoing network summary, a crash alert is a discrete event: it can be swiped away. **Tapping it opens the dashboard on the Console tab**, where the error and its stack trace landed.
 
 > **Native platforms only.** Like the network notification, this relies on `flutter_local_notifications`, which the web build deliberately excludes to stay WASM-compatible. On web `showCrashNotification` is accepted but never shows anything — errors are still captured to the Console as usual.
-
+>
 > **Known limitation — startup gap.** Notification initialisation is an asynchronous platform call, while the error hooks attach synchronously. A crash in that window (tens of milliseconds after construction) is still recorded to the Console, but no notification is shown. This is accepted rather than fixed; the log and timeline capture it either way.
 
 ### App lifecycle markers (opt-in)
