@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_inspector_kit/src/core/flutter_inspector.dart';
 import 'package:flutter_inspector_kit/src/models/network_entry.dart';
 import 'package:flutter_inspector_kit/src/notifications/alert_throttler.dart';
 import 'package:flutter_inspector_kit/src/notifications/network_notifier.dart';
@@ -246,6 +248,35 @@ void main() {
       // Consuming the network slot must leave the crash slot untouched.
       expect(crashThrottler.shouldAlert(), isTrue);
     });
+
+    test(
+      'crash notifier is assigned before init() is awaited (PR #157 review)',
+      () async {
+        // Regression guard: the error hooks are attached in the constructor,
+        // well before _initCrashNotifier's await resolves. If the field were
+        // assigned only *after* the await, every crash during startup would
+        // hit a null notifier and be silently dropped. Injecting a notifier
+        // and driving a crash synchronously proves the field is already set.
+        final notifier = NetworkNotifier.crash();
+        final inspector = FlutterInspector(
+          navigatorKey: GlobalKey<NavigatorState>(),
+          showCrashNotification: true,
+          crashNotifier: notifier,
+        );
+
+        // No await here: this is the exact window in which the hooks are live
+        // but init() has not resolved. If the field were assigned only after
+        // the await, it would still be null at this point and every crash in
+        // this window would be dropped.
+        expect(
+          inspector.crashNotifierForTesting,
+          same(notifier),
+          reason:
+              'crash notifier must be assigned before init() is awaited, '
+              'otherwise startup crashes hit a null field and are dropped',
+        );
+      },
+    );
 
     group('buildDetails for crash alerts', () {
       test('ongoing defaults to true (network summary is persistent)', () {

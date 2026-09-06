@@ -1,7 +1,7 @@
 # 功能規格：Crash 系統通知（Crash Notification）
 
 - **日期**：2026-09-06
-- **狀態**：待確認
+- **狀態**：已實作（Issue #156 / PR #157）
 - **關聯**：§P11（多告警類型重構 NetworkNotifier）為本功能的**解鎖前提**
 
 ---
@@ -106,7 +106,12 @@ crash 可能在一秒內連續觸發數十次（例如 build 迴圈中的錯誤�
 ### 4.1 行為
 
 - [ ] `showCrashNotification` 預設 `false`；不開啟時行為與現況**完全一致**
-- [ ] 開啟後，三種 crash 來源任一觸發 → 推送一則系統通知
+- [ ] 開啟後（**且 `captureUncaughtErrors` 亦為 `true`**，否則 hook 未掛載、無事件可通知），
+      三種 crash 來源任一觸發 → 推送一則系統通知。
+      **例外**：通知初始化（`init()`）是非同步平台呼叫，在其完成前發生的 crash
+      仍會寫入 log，但不會顯示通知（notifier 尚未可用）。此為平台限制，
+      非可修補的漏接路徑——`_crashNotifier` 已改為 `init()` await 前即指派，
+      確保欄位不會是 null 而靜默丟棄
 - [ ] 通知內容含：錯誤類型（`exceptionType`）與訊息摘要
 - [ ] 點擊通知 → 開啟 dashboard 的 Console tab（對齊既有網路通知點擊開 Network tab 的慣例）
 - [ ] crash 通知與網路通知**可同時存在**，互不覆蓋

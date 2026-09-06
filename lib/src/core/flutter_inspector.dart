@@ -286,16 +286,27 @@ class FlutterInspector {
     }
   }
 
-  /// Crash notifier, non-null only once [_initCrashNotifier] has resolved.
-  /// Crashes arriving before init are dropped rather than queued: the notifier
-  /// would no-op on them anyway (it is unavailable until init succeeds).
+  /// Crash notifier. Assigned synchronously in the constructor (before
+  /// [init] is awaited) so a crash during startup still reaches it: the error
+  /// hooks are attached before initialisation can possibly finish, and a null
+  /// field here would silently drop those crashes.
+  ///
+  /// Crashes arriving before [init] resolves are still not *shown* — the
+  /// notifier is unavailable until then, so [NetworkNotifier.showCrash]
+  /// no-ops. That is a platform limitation (initialisation is an async channel
+  /// call), not a dropped notification path.
   NetworkNotifier? _crashNotifier;
+
+  /// The crash notifier, exposed so tests can assert it is assigned
+  /// synchronously (before [NetworkNotifier.init] is awaited).
+  @visibleForTesting
+  NetworkNotifier? get crashNotifierForTesting => _crashNotifier;
 
   Future<void> _initCrashNotifier({NetworkNotifier? notifier}) async {
     final crash =
         notifier ?? NetworkNotifier.crash(onTap: _openConsoleFromNotification);
-    await crash.init();
     _crashNotifier = crash;
+    await crash.init();
   }
 
   void _notifyCrash(String message, Map<String, dynamic>? data) {

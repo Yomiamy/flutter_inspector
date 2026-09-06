@@ -152,10 +152,12 @@ NetworkNotifier.crash(onTap: _openConsoleFromNotification)  // crash id/channel
       **🔴 不可用 `example/` 當關卡**（2026-09-06 實測確認）：`example/` 依賴 ObjectBox，
       而 ObjectBox 是 native-only（`dart:ffi`），在該目錄跑 `flutter build web`
       **永遠失敗且與本功能無關**：
-      ```
-      package:example/demos/objectbox_demo.dart → objectbox-5.3.2/lib/src/native/*
-      Error: Dart library 'dart:ffi' is not available on this platform.
-      ```
+
+  ```text
+  package:example/demos/objectbox_demo.dart → objectbox-5.3.2/lib/src/native/*
+  Error: Dart library 'dart:ffi' is not available on this platform.
+  ```
+
       **正確作法**：建一個只依賴本套件的最小專案（scratchpad 即可），
       `main.dart` 至少實例化一次 `FlutterInspector(... showNetworkNotification: true,
       showCrashNotification: true)` 讓條件匯出的兩個建構式都進入編譯圖，再 `flutter build web`。
