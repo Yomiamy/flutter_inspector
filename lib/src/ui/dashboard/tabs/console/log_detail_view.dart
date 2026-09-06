@@ -90,8 +90,9 @@ class _LogDetailViewState extends State<LogDetailView> {
 
   Widget _stackTraceSection(BuildContext context) {
     final stackTrace = widget.entry.stackTrace!;
-    final displayedStackTrace =
-        _isConcise ? normalizeStackTrace(stackTrace) : stackTrace;
+    final displayedStackTrace = _isConcise
+        ? normalizeStackTrace(stackTrace)
+        : stackTrace;
 
     return DetailSection(
       title: 'Stack Trace',
@@ -137,7 +138,8 @@ class _LogDetailViewState extends State<LogDetailView> {
     final messenger = ScaffoldMessenger.of(context);
 
     final bool isConcise =
-        action == _ShareAction.copyConcise || action == _ShareAction.shareConcise;
+        action == _ShareAction.copyConcise ||
+        action == _ShareAction.shareConcise;
 
     final String logText = buildLogPlainText(
       widget.entry,

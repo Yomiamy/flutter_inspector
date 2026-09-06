@@ -15,10 +15,7 @@ class _Data {
     level: LogLevel.error,
   );
 
-  static final infoLog = LogEntry(
-    message: 'cart opened',
-    level: LogLevel.info,
-  );
+  static final infoLog = LogEntry(message: 'cart opened', level: LogLevel.info);
 
   static final warningLog = LogEntry(
     message: 'slow response',
@@ -146,20 +143,17 @@ void main() {
       expect(result, isNot(contains(_Data.infoLog)));
     });
 
-    test(
-      'non-log entries survive a level filter — otherwise the level chips '
-      'would silently degrade into a source filter (AC-4)',
-      () {
-        final result = applyConsoleFilter(
-          _Data.all,
-          const ConsoleFilter(levels: {LogLevel.error}),
-        );
-        expect(result, contains(_Data.successfulCartCall));
-        expect(result, contains(_Data.failedCall));
-        expect(result, contains(_Data.navEntry));
-        expect(result, contains(_Data.dbEntry));
-      },
-    );
+    test('non-log entries survive a level filter — otherwise the level chips '
+        'would silently degrade into a source filter (AC-4)', () {
+      final result = applyConsoleFilter(
+        _Data.all,
+        const ConsoleFilter(levels: {LogLevel.error}),
+      );
+      expect(result, contains(_Data.successfulCartCall));
+      expect(result, contains(_Data.failedCall));
+      expect(result, contains(_Data.navEntry));
+      expect(result, contains(_Data.dbEntry));
+    });
 
     test('multiple levels are OR-ed within the log type', () {
       final result = applyConsoleFilter(
@@ -192,18 +186,15 @@ void main() {
       expect(result, isNot(contains(_Data.infoLog)));
     });
 
-    test(
-      'drops navigator and database entries, which carry no failure notion '
-      '(AC-5a)',
-      () {
-        final result = applyConsoleFilter(
-          _Data.all,
-          const ConsoleFilter(errorsOnly: true),
-        );
-        expect(result, isNot(contains(_Data.navEntry)));
-        expect(result, isNot(contains(_Data.dbEntry)));
-      },
-    );
+    test('drops navigator and database entries, which carry no failure notion '
+        '(AC-5a)', () {
+      final result = applyConsoleFilter(
+        _Data.all,
+        const ConsoleFilter(errorsOnly: true),
+      );
+      expect(result, isNot(contains(_Data.navEntry)));
+      expect(result, isNot(contains(_Data.dbEntry)));
+    });
 
     test('supersedes the level set rather than intersecting with it', () {
       final result = applyConsoleFilter(
@@ -216,23 +207,20 @@ void main() {
   });
 
   group('orthogonal composition (AC-6a / AC-6e)', () {
-    test(
-      'level + keyword: a successful /api/cart call survives an error chip, '
-      'because level never applies to network entries (AC-6a)',
-      () {
-        final result = applyConsoleFilter(
-          _Data.all,
-          const ConsoleFilter(keyword: 'cart', levels: {LogLevel.error}),
-        );
+    test('level + keyword: a successful /api/cart call survives an error chip, '
+        'because level never applies to network entries (AC-6a)', () {
+      final result = applyConsoleFilter(
+        _Data.all,
+        const ConsoleFilter(keyword: 'cart', levels: {LogLevel.error}),
+      );
 
-        expect(result, contains(_Data.successfulCartCall));
-        expect(result, contains(_Data.errorLog));
-        // The info log matches "cart" but fails the level constraint.
-        expect(result, isNot(contains(_Data.infoLog)));
-        // The failed call does not match the keyword at all.
-        expect(result, isNot(contains(_Data.failedCall)));
-      },
-    );
+      expect(result, contains(_Data.successfulCartCall));
+      expect(result, contains(_Data.errorLog));
+      // The info log matches "cart" but fails the level constraint.
+      expect(result, isNot(contains(_Data.infoLog)));
+      // The failed call does not match the keyword at all.
+      expect(result, isNot(contains(_Data.failedCall)));
+    });
 
     test(
       'errorsOnly + keyword: the keyword applies after the union, not to one '

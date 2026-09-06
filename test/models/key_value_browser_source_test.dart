@@ -44,10 +44,12 @@ void main() {
       await source.remove('token');
       await source.clear();
 
-      expect(
-        (source as _FakeKeyValueSource).calls,
-        ['listAll', 'setValue:token=xyz', 'remove:token', 'clear'],
-      );
+      expect((source as _FakeKeyValueSource).calls, [
+        'listAll',
+        'setValue:token=xyz',
+        'remove:token',
+        'clear',
+      ]);
     });
   });
 

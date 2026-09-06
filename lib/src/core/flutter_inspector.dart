@@ -286,15 +286,16 @@ class FlutterInspector {
     }
   }
 
-  /// Crash notifier. Assigned synchronously in the constructor (before
-  /// [init] is awaited) so a crash during startup still reaches it: the error
-  /// hooks are attached before initialisation can possibly finish, and a null
-  /// field here would silently drop those crashes.
+  /// Crash notifier. Assigned synchronously (before `init()` is awaited) so
+  /// this field is never null once the constructor returns.
   ///
-  /// Crashes arriving before [init] resolves are still not *shown* — the
-  /// notifier is unavailable until then, so [NetworkNotifier.showCrash]
-  /// no-ops. That is a platform limitation (initialisation is an async channel
-  /// call), not a dropped notification path.
+  /// **This does not make startup crashes notify.** The notifier stays
+  /// unavailable until `init()` resolves, so [NetworkNotifier.showCrash]
+  /// no-ops during that window either way — the assignment order only moves
+  /// where the call stops, not whether a notification appears. Fixing the
+  /// window for real needs queue-and-flush; it is a documented known
+  /// limitation instead. See `docs/features/2026-09-06-crash-notification.md`
+  /// §6.5.
   NetworkNotifier? _crashNotifier;
 
   /// The crash notifier, exposed so tests can assert it is assigned

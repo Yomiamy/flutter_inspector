@@ -252,11 +252,13 @@ void main() {
     test(
       'crash notifier is assigned before init() is awaited (PR #157 review)',
       () async {
-        // Regression guard: the error hooks are attached in the constructor,
-        // well before _initCrashNotifier's await resolves. If the field were
-        // assigned only *after* the await, every crash during startup would
-        // hit a null notifier and be silently dropped. Injecting a notifier
-        // and driving a crash synchronously proves the field is already set.
+        // Regression guard for the field being non-null once the constructor
+        // returns. Note this does NOT make startup crashes notify: the
+        // notifier is unavailable until init() resolves, so showCrash no-ops
+        // during that window regardless of assignment order. This only locks
+        // down the structural invariant (no null window). The user-visible
+        // startup gap is an accepted known limitation — see
+        // docs/features/2026-09-06-crash-notification.md §6.5.
         final notifier = NetworkNotifier.crash();
         final inspector = FlutterInspector(
           navigatorKey: GlobalKey<NavigatorState>(),
