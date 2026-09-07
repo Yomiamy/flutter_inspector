@@ -9,12 +9,12 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   group('NetworkNotifier (degraded / not initialised)', () {
     test('is unavailable before init', () {
-      final notifier = NetworkNotifier();
+      final notifier = NetworkNotifier.network();
       expect(notifier.isAvailable, isFalse);
     });
 
     test('showOrUpdate is a safe no-op when unavailable', () async {
-      final notifier = NetworkNotifier();
+      final notifier = NetworkNotifier.network();
       // No init() called -> _available is false -> must not throw.
       await expectLater(
         notifier.showOrUpdate(
@@ -26,7 +26,7 @@ void main() {
     });
 
     test('cancel is a safe no-op when unavailable', () async {
-      final notifier = NetworkNotifier();
+      final notifier = NetworkNotifier.network();
       await expectLater(notifier.cancel(), completes);
     });
 
@@ -53,7 +53,7 @@ void main() {
         // after showOrUpdate is called on an unavailable notifier.
         DateTime fakeNow = DateTime(2026, 1, 1);
         final throttler = AlertThrottler(now: () => fakeNow);
-        final notifier = NetworkNotifier(throttler: throttler);
+        final notifier = NetworkNotifier.network(throttler: throttler);
         // _available is false — no init()
         await notifier.showOrUpdate(
           NetworkEntry(method: 'GET', url: '/test', statusCode: 200),
@@ -241,7 +241,7 @@ void main() {
       DateTime fakeNow = DateTime(2026, 1, 1);
       final networkThrottler = AlertThrottler(now: () => fakeNow);
       final crashThrottler = AlertThrottler(now: () => fakeNow);
-      NetworkNotifier(throttler: networkThrottler);
+      NetworkNotifier.network(throttler: networkThrottler);
       NetworkNotifier.crash(throttler: crashThrottler);
 
       expect(networkThrottler.shouldAlert(), isTrue);

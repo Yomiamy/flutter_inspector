@@ -12,15 +12,21 @@ import 'alert_throttler.dart';
 class NetworkNotifier {
   /// Creates a no-op notifier. Parameters mirror the native implementation so
   /// call sites compile unchanged; [plugin] is accepted but never used.
-  NetworkNotifier({Object? plugin, AlertThrottler? throttler, this.onTap});
+  NetworkNotifier._({this.onTap});
 
-  /// Creates a no-op crash notifier. Mirrors the native named constructor so
-  /// shared call sites compile on web.
-  NetworkNotifier.crash({
+  /// No-op counterpart of the native network factory.
+  factory NetworkNotifier.network({
     Object? plugin,
     AlertThrottler? throttler,
-    this.onTap,
-  });
+    VoidCallback? onTap,
+  }) => NetworkNotifier._(onTap: onTap);
+
+  /// No-op counterpart of the native crash factory.
+  factory NetworkNotifier.crash({
+    Object? plugin,
+    AlertThrottler? throttler,
+    VoidCallback? onTap,
+  }) => NetworkNotifier._(onTap: onTap);
 
   /// Invoked when the user taps the notification. Never fires on web.
   final VoidCallback? onTap;

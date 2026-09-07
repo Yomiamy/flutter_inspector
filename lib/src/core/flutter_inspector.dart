@@ -321,7 +321,8 @@ class FlutterInspector {
 
   Future<void> _initNetworkNotifier({NetworkNotifier? notifier}) async {
     final networkNotifier =
-        notifier ?? NetworkNotifier(onTap: _openNetworkFromNotification);
+        notifier ??
+        NetworkNotifier.network(onTap: _openNetworkFromNotification);
     await networkNotifier.init();
     // Wire onAdd only after init() resolves. init() never rejects (it catches
     // and swallows platform errors internally), so this callback always runs.

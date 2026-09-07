@@ -9,45 +9,77 @@ import 'alert_throttler.dart';
 /// it explicitly. All platform calls degrade safely: if initialisation or
 /// permission fails, the notifier silently becomes a no-op instead of crashing.
 class NetworkNotifier {
-  /// Creates a notifier.
+  /// The single point where a notifier is actually built. Every category goes
+  /// through here, so the identity of a notification (id, channel, ongoing,
+  /// legacy cleanup) is chosen in exactly one place per category and can never
+  /// be assembled inconsistently by a caller.
+  NetworkNotifier._({
+    required int notificationId,
+    required String channelId,
+    required String channelName,
+    required String channelDescription,
+    required bool ongoing,
+    required bool deleteLegacy,
+    FlutterLocalNotificationsPlugin? plugin,
+    AlertThrottler? throttler,
+    this.onTap,
+  }) : _plugin = plugin ?? FlutterLocalNotificationsPlugin(),
+       _throttler = throttler ?? AlertThrottler(),
+       _notificationId = notificationId,
+       _channelId = channelId,
+       _channelName = channelName,
+       _channelDescription = channelDescription,
+       _ongoing = ongoing,
+       _deleteLegacy = deleteLegacy;
+
+  /// Creates the notifier for the live network summary.
+  ///
+  /// A continuously-updated, `ongoing` notification: it stays in the shade and
+  /// is not dismissible. This is the category that owned the legacy channel,
+  /// so it is also the only one that cleans it up.
   ///
   /// [plugin] can be supplied in tests to avoid the platform plugin chain.
   /// [throttler] can be supplied in tests to control timing; defaults to a
   /// production [AlertThrottler] with the standard 2-second window.
-  NetworkNotifier({
+  factory NetworkNotifier.network({
     FlutterLocalNotificationsPlugin? plugin,
     AlertThrottler? throttler,
-    this.onTap,
-  }) : _plugin = plugin ?? FlutterLocalNotificationsPlugin(),
-       _throttler = throttler ?? AlertThrottler(),
-       _notificationId = networkNotificationId,
-       _channelId = _networkChannelId,
-       _channelName = _networkChannelName,
-       _ongoing = true,
-       _deleteLegacy = true;
+    VoidCallback? onTap,
+  }) => NetworkNotifier._(
+    notificationId: networkNotificationId,
+    channelId: _networkChannelId,
+    channelName: _networkChannelName,
+    channelDescription: 'Live HTTP activity captured by Flutter Inspector',
+    ongoing: true,
+    deleteLegacy: true,
+    plugin: plugin,
+    throttler: throttler,
+    onTap: onTap,
+  );
 
-  /// Creates a notifier for crash alerts.
+  /// Creates the notifier for crash alerts.
   ///
-  /// Differs from the default (network) notifier in four ways, all of which
-  /// follow from crashes being *discrete events* rather than a continuously
-  /// updated summary:
-  /// - its own notification id, so a crash alert never overwrites the network
-  ///   summary (and vice versa);
-  /// - its own channel, so users can silence one category without the other;
-  /// - `ongoing: false`, so the alert can be swiped away;
-  /// - no legacy-channel deletion, which only ever applied to the network
-  ///   channel.
-  NetworkNotifier.crash({
+  /// Every difference from [NetworkNotifier.network] follows from crashes being
+  /// *discrete events* rather than a continuously updated summary: its own id
+  /// (so a crash alert never overwrites the network summary, or vice versa),
+  /// its own channel (so either category can be silenced alone), `ongoing:
+  /// false` (so the alert can be swiped away), and no legacy-channel deletion
+  /// (that channel only ever belonged to the network summary).
+  factory NetworkNotifier.crash({
     FlutterLocalNotificationsPlugin? plugin,
     AlertThrottler? throttler,
-    this.onTap,
-  }) : _plugin = plugin ?? FlutterLocalNotificationsPlugin(),
-       _throttler = throttler ?? AlertThrottler(),
-       _notificationId = crashNotificationId,
-       _channelId = _crashChannelId,
-       _channelName = _crashChannelName,
-       _ongoing = false,
-       _deleteLegacy = false;
+    VoidCallback? onTap,
+  }) => NetworkNotifier._(
+    notificationId: crashNotificationId,
+    channelId: _crashChannelId,
+    channelName: _crashChannelName,
+    channelDescription: 'Uncaught errors captured by Flutter Inspector',
+    ongoing: false,
+    deleteLegacy: false,
+    plugin: plugin,
+    throttler: throttler,
+    onTap: onTap,
+  );
 
   /// Invoked when the user taps the notification (payload routing handled by
   /// the owner, e.g. opening the Network tab).
@@ -62,6 +94,7 @@ class NetworkNotifier {
   final int _notificationId;
   final String _channelId;
   final String _channelName;
+  final String _channelDescription;
   final bool _ongoing;
   final bool _deleteLegacy;
 
@@ -228,6 +261,16 @@ class NetworkNotifier {
     );
   }
 
+  /// [buildDetails] applied to this notifier's own category, so neither send
+  /// path has to restate the identity chosen by its factory.
+  NotificationDetails _details({required bool alert}) => buildDetails(
+    alert: alert,
+    ongoing: _ongoing,
+    channelId: _channelId,
+    channelName: _channelName,
+    channelDescription: _channelDescription,
+  );
+
   /// Posts or updates the single network notification with [entry] and the
   /// running [totalCount]. No-op when the notifier is unavailable.
   ///
@@ -250,12 +293,7 @@ class NetworkNotifier {
         id: _notificationId,
         title: 'Network · $totalCount calls',
         body: '[${entry.method}] ${entry.url} · $status',
-        notificationDetails: buildDetails(
-          alert: alert,
-          ongoing: _ongoing,
-          channelId: _channelId,
-          channelName: _channelName,
-        ),
+        notificationDetails: _details(alert: alert),
       );
     } catch (e) {
       debugPrint('[FlutterInspector] notification update failed: $e');
@@ -279,13 +317,7 @@ class NetworkNotifier {
         id: _notificationId,
         title: 'Crash · $exceptionType',
         body: _summarize(message),
-        notificationDetails: buildDetails(
-          alert: alert,
-          ongoing: _ongoing,
-          channelId: _channelId,
-          channelName: _channelName,
-          channelDescription: 'Uncaught errors captured by Flutter Inspector',
-        ),
+        notificationDetails: _details(alert: alert),
       );
     } catch (e) {
       debugPrint('[FlutterInspector] crash notification failed: $e');
