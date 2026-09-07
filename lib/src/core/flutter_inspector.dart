@@ -305,7 +305,10 @@ class FlutterInspector {
 
   Future<void> _initCrashNotifier({NetworkNotifier? notifier}) async {
     final crash =
-        notifier ?? NetworkNotifier.crash(onTap: _openConsoleFromNotification);
+        notifier ??
+        // Tapping a crash alert opens the Console tab — that is where the
+        // error and its stack trace landed.
+        NetworkNotifier.crash(onTap: () => openDashboard(initialIndex: 0));
     _crashNotifier = crash;
     await crash.init();
   }
@@ -320,7 +323,8 @@ class FlutterInspector {
   Future<void> _initNetworkNotifier({NetworkNotifier? notifier}) async {
     final networkNotifier =
         notifier ??
-        NetworkNotifier.network(onTap: _openNetworkFromNotification);
+        // Tapping the network summary opens the Network tab.
+        NetworkNotifier.network(onTap: () => openDashboard(initialIndex: 1));
     await networkNotifier.init();
     // Wire onAdd only after init() resolves. init() never rejects (it catches
     // and swallows platform errors internally), so this callback always runs.
@@ -454,17 +458,6 @@ class FlutterInspector {
     final context = navigatorKey.currentContext;
     if (context == null) return;
     DashboardModal.show(context, this, initialIndex: initialIndex);
-  }
-
-  /// Opens the dashboard on the Network tab in response to a notification tap.
-  void _openNetworkFromNotification() {
-    openDashboard(initialIndex: 1);
-  }
-
-  /// Opens the dashboard on the Console tab in response to a crash
-  /// notification tap — that is where the error and its stack trace landed.
-  void _openConsoleFromNotification() {
-    openDashboard(initialIndex: 0);
   }
 
   /// Clears all console logs.
