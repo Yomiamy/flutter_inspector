@@ -25,6 +25,13 @@ void main() {
     // together cover framework, asynchronous and build-time errors. No zone is
     // involved, so there is no Zone mismatch to worry about.
     captureUncaughtErrors: true,
+    // Also raise a throttled system notification for uncaught errors (opt-in).
+    // Requires captureUncaughtErrors above: without the hooks there is no
+    // event to notify about. Uses its own notification id, channel and
+    // throttler, so a crash alert never replaces the network summary — but a
+    // burst of errors re-alerts at most once per throttle window. Native
+    // platforms only; the web build is a no-op.
+    showCrashNotification: true,
     // Record app foreground/background transitions as info logs (opt-in).
     // Each entry names the current top page (e.g. "resumed · HomePage"), so
     // the nearest lifecycle entry above a crash tells you both whether the app

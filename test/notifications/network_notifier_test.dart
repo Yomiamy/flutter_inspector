@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_inspector_kit/src/core/flutter_inspector.dart';
 import 'package:flutter_inspector_kit/src/models/network_entry.dart';
 import 'package:flutter_inspector_kit/src/notifications/alert_throttler.dart';
 import 'package:flutter_inspector_kit/src/notifications/network_notifier.dart';
@@ -7,12 +9,12 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   group('NetworkNotifier (degraded / not initialised)', () {
     test('is unavailable before init', () {
-      final notifier = NetworkNotifier();
+      final notifier = NetworkNotifier.network();
       expect(notifier.isAvailable, isFalse);
     });
 
     test('showOrUpdate is a safe no-op when unavailable', () async {
-      final notifier = NetworkNotifier();
+      final notifier = NetworkNotifier.network();
       // No init() called -> _available is false -> must not throw.
       await expectLater(
         notifier.showOrUpdate(
@@ -24,7 +26,7 @@ void main() {
     });
 
     test('cancel is a safe no-op when unavailable', () async {
-      final notifier = NetworkNotifier();
+      final notifier = NetworkNotifier.network();
       await expectLater(notifier.cancel(), completes);
     });
 
@@ -51,7 +53,7 @@ void main() {
         // after showOrUpdate is called on an unavailable notifier.
         DateTime fakeNow = DateTime(2026, 1, 1);
         final throttler = AlertThrottler(now: () => fakeNow);
-        final notifier = NetworkNotifier(throttler: throttler);
+        final notifier = NetworkNotifier.network(throttler: throttler);
         // _available is false — no init()
         await notifier.showOrUpdate(
           NetworkEntry(method: 'GET', url: '/test', statusCode: 200),
@@ -190,6 +192,147 @@ void main() {
 
       test('iOS presentSound is false', () {
         expect(details.iOS!.presentSound, isFalse);
+      });
+    });
+  });
+
+  group('NetworkNotifier.crash (issue #156)', () {
+    // Same mock-free convention as the groups above: init() is never called,
+    // so the notifier stays unavailable and _plugin.show is never reached.
+    // What is verifiable from outside is the identity of the notification
+    // (distinct id / channel) and the guard ordering around the throttler.
+
+    test('is unavailable before init', () {
+      expect(NetworkNotifier.crash().isAvailable, isFalse);
+    });
+
+    test('showCrash is a safe no-op when unavailable', () async {
+      final notifier = NetworkNotifier.crash();
+      await expectLater(
+        notifier.showCrash(exceptionType: 'StateError', message: 'boom'),
+        completes,
+      );
+    });
+
+    test('crash and network notification ids differ', () {
+      // The whole point of the §P11 parameterisation: a crash alert must not
+      // overwrite the network summary, which a shared id would cause.
+      expect(
+        NetworkNotifier.crashNotificationId,
+        isNot(NetworkNotifier.networkNotificationId),
+      );
+    });
+
+    test('unavailable: showCrash does not consume a throttle slot', () async {
+      DateTime fakeNow = DateTime(2026, 1, 1);
+      final throttler = AlertThrottler(now: () => fakeNow);
+      final notifier = NetworkNotifier.crash(throttler: throttler);
+      await notifier.showCrash(exceptionType: 'StateError', message: 'boom');
+      expect(
+        throttler.shouldAlert(),
+        isTrue,
+        reason: 'unavailable guard must fire before throttler.shouldAlert()',
+      );
+    });
+
+    test('crash and network notifiers throttle independently', () {
+      // Each notifier owns its throttler, so a burst of network activity must
+      // not suppress a crash alert (or vice versa).
+      DateTime fakeNow = DateTime(2026, 1, 1);
+      final networkThrottler = AlertThrottler(now: () => fakeNow);
+      final crashThrottler = AlertThrottler(now: () => fakeNow);
+      NetworkNotifier.network(throttler: networkThrottler);
+      NetworkNotifier.crash(throttler: crashThrottler);
+
+      expect(networkThrottler.shouldAlert(), isTrue);
+      // Consuming the network slot must leave the crash slot untouched.
+      expect(crashThrottler.shouldAlert(), isTrue);
+    });
+
+    test(
+      'crash notifier is assigned before init() is awaited (PR #157 review)',
+      () async {
+        // Regression guard for the field being non-null once the constructor
+        // returns. Note this does NOT make startup crashes notify: the
+        // notifier is unavailable until init() resolves, so showCrash no-ops
+        // during that window regardless of assignment order. This only locks
+        // down the structural invariant (no null window). The user-visible
+        // startup gap is an accepted known limitation — see
+        // docs/features/2026-09-06-crash-notification.md §6.5.
+        final notifier = NetworkNotifier.crash();
+        final inspector = FlutterInspector(
+          navigatorKey: GlobalKey<NavigatorState>(),
+          showCrashNotification: true,
+          crashNotifier: notifier,
+        );
+
+        // No await here: this is the exact window in which the hooks are live
+        // but init() has not resolved. If the field were assigned only after
+        // the await, it would still be null at this point and every crash in
+        // this window would be dropped.
+        expect(
+          inspector.crashNotifierForTesting,
+          same(notifier),
+          reason:
+              'crash notifier must be assigned before init() is awaited, '
+              'otherwise startup crashes hit a null field and are dropped',
+        );
+      },
+    );
+
+    group('buildDetails for crash alerts', () {
+      test('ongoing defaults to true (network summary is persistent)', () {
+        final details = NetworkNotifier.buildDetails(alert: true);
+        expect(details.android!.ongoing, isTrue);
+      });
+
+      test('ongoing: false makes the alert dismissible', () {
+        final details = NetworkNotifier.buildDetails(
+          alert: true,
+          ongoing: false,
+        );
+        expect(details.android!.ongoing, isFalse);
+      });
+
+      test('channel id and name are overridable', () {
+        final details = NetworkNotifier.buildDetails(
+          alert: true,
+          channelId: 'flutter_inspector_crash',
+          channelName: 'Crash Inspector',
+        );
+        expect(details.android!.channelId, 'flutter_inspector_crash');
+        expect(details.android!.channelName, 'Crash Inspector');
+      });
+
+      test('defaults keep the existing network channel', () {
+        final details = NetworkNotifier.buildDetails(alert: true);
+        expect(details.android!.channelId, 'flutter_inspector_network_v2');
+        expect(details.android!.channelName, 'Network Inspector');
+      });
+    });
+
+    group('summarize', () {
+      test('collapses whitespace to a single line', () {
+        expect(
+          NetworkNotifier.summarize('line one\n  line two\t\tline three'),
+          'line one line two line three',
+        );
+      });
+
+      test('leaves a short message unchanged', () {
+        expect(NetworkNotifier.summarize('boom'), 'boom');
+      });
+
+      test('truncates an over-long message with an ellipsis', () {
+        final result = NetworkNotifier.summarize('x' * 200);
+        expect(result.length, 120);
+        expect(result.endsWith('…'), isTrue);
+      });
+
+      test('does not truncate at exactly the limit', () {
+        final result = NetworkNotifier.summarize('x' * 120);
+        expect(result.length, 120);
+        expect(result.contains('…'), isFalse);
       });
     });
   });

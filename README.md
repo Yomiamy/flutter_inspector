@@ -482,6 +482,30 @@ This wires three standard Flutter hooks — `FlutterError.onError` (build/layout
 
 Captured errors appear as red logs in the **Console** tab. Tap any log that carries a stack trace or structured data to open a detail view with a copyable stack trace and the structured payload, plus copy/share actions.
 
+#### Crash notifications (opt-in)
+
+Captured errors can also raise a **system notification**, so a crash while the app is backgrounded — or while you are looking at another screen — is noticed immediately instead of on the next trip to the dashboard:
+
+```dart
+final inspector = FlutterInspector(
+  navigatorKey: navigatorKey,
+  captureUncaughtErrors: true,  // required — see below
+  showCrashNotification: true,
+);
+```
+
+> **`captureUncaughtErrors: true` is required.** Without the error hooks attached there is no event to notify about, so `showCrashNotification` alone does nothing. It is deliberately not made to enable capture on its own — installing global error handlers is your decision, not the package's.
+
+Crash notifications are independent of the [network notification](#live-notification-opt-in): they use their own notification id and their own throttler, so **a crash alert never replaces the network summary** and a burst of network activity cannot suppress a crash alert. On Android they also use a separate channel (`flutter_inspector_crash`), so each category can be silenced independently in system settings.
+
+**Alerts are throttled, not one-per-error.** Every captured error updates the notification's content, but the system only re-alerts (heads-up banner) at most once per 2-second window — an error storm produces one alert, not fifty. All errors are still recorded in full in the Console tab.
+
+Unlike the ongoing network summary, a crash alert is a discrete event: it can be swiped away. **Tapping it opens the dashboard on the Console tab**, where the error and its stack trace landed.
+
+> **Native platforms only.** Like the network notification, this relies on `flutter_local_notifications`, which the web build deliberately excludes to stay WASM-compatible. On web `showCrashNotification` is accepted but never shows anything — errors are still captured to the Console as usual.
+>
+> **Known limitation — startup gap.** Notification initialisation is an asynchronous platform call, while the error hooks attach synchronously. A crash in that window (tens of milliseconds after construction) is still recorded to the Console, but no notification is shown. This is accepted rather than fixed; the log and timeline capture it either way.
+
 ### App lifecycle markers (opt-in)
 
 Enable **lifecycle capture** to record every foreground/background transition as an `info`-level Console log, so a crash or a stalled request can be read against whether the app was in the foreground at that moment:

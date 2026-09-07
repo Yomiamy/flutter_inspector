@@ -9,17 +9,28 @@ import 'alert_throttler.dart';
 /// it explicitly. All platform calls degrade safely: if initialisation or
 /// permission fails, the notifier silently becomes a no-op instead of crashing.
 class NetworkNotifier {
-  /// Creates a notifier.
-  ///
-  /// [plugin] can be supplied in tests to avoid the platform plugin chain.
-  /// [throttler] can be supplied in tests to control timing; defaults to a
-  /// production [AlertThrottler] with the standard 2-second window.
-  NetworkNotifier({
-    FlutterLocalNotificationsPlugin? plugin,
-    AlertThrottler? throttler,
-    this.onTap,
-  }) : _plugin = plugin ?? FlutterLocalNotificationsPlugin(),
-       _throttler = throttler ?? AlertThrottler();
+  /// Notification id of the network summary.
+  @visibleForTesting
+  static const int networkNotificationId = 0x6E657477; // 'netw'
+
+  /// Notification id of a crash alert.
+  @visibleForTesting
+  static const int crashNotificationId = 0x63726173; // 'cras'
+
+  static const String _networkChannelId = 'flutter_inspector_network_v2';
+  static const String _networkChannelName = 'Network Inspector';
+
+  static const String _crashChannelId = 'flutter_inspector_crash';
+  static const String _crashChannelName = 'Crash Inspector';
+
+  // The old channel ID used before T3. Kept as a named constant so the
+  // deletion call below is self-documenting and easy to search/grep.
+  // Android only: on init(), this channel is deleted so the system settings
+  // page does not accumulate orphan channels.
+  static const String _legacyChannelId = 'flutter_inspector_network';
+
+  /// Cap for a notification body; the shade shows only a couple of lines.
+  static const int _maxBodyLength = 120;
 
   /// Invoked when the user taps the notification (payload routing handled by
   /// the owner, e.g. opening the Network tab).
@@ -28,19 +39,90 @@ class NetworkNotifier {
   final FlutterLocalNotificationsPlugin _plugin;
   final AlertThrottler _throttler;
 
-  static const int _notificationId = 0x6E657477; // 'netw'
-
-  static const String _channelId = 'flutter_inspector_network_v2';
-  static const String _channelName = 'Network Inspector';
-
-  // The old channel ID used before T3. Kept as a named constant so the
-  // deletion call below is self-documenting and easy to search/grep.
-  // Android only: on init(), this channel is deleted so the system settings
-  // page does not accumulate orphan channels.
-  static const String _legacyChannelId = 'flutter_inspector_network';
+  /// Identifies this notifier's single notification. Distinct per category so
+  /// the network summary and a crash alert coexist instead of replacing one
+  /// another.
+  final int _notificationId;
+  final String _channelId;
+  final String _channelName;
+  final String _channelDescription;
+  final bool _ongoing;
+  final bool _deleteLegacy;
 
   bool _initialized = false;
   bool _available = false;
+
+  /// The single point where a notifier is actually built. Every category goes
+  /// through here, so the identity of a notification (id, channel, ongoing,
+  /// legacy cleanup) is chosen in exactly one place per category and can never
+  /// be assembled inconsistently by a caller.
+  NetworkNotifier._({
+    required int notificationId,
+    required String channelId,
+    required String channelName,
+    required String channelDescription,
+    required bool ongoing,
+    required bool deleteLegacy,
+    FlutterLocalNotificationsPlugin? plugin,
+    AlertThrottler? throttler,
+    this.onTap,
+  }) : _plugin = plugin ?? FlutterLocalNotificationsPlugin(),
+       _throttler = throttler ?? AlertThrottler(),
+       _notificationId = notificationId,
+       _channelId = channelId,
+       _channelName = channelName,
+       _channelDescription = channelDescription,
+       _ongoing = ongoing,
+       _deleteLegacy = deleteLegacy;
+
+  /// Creates the notifier for the live network summary.
+  ///
+  /// A continuously-updated, `ongoing` notification: it stays in the shade and
+  /// is not dismissible. This is the category that owned the legacy channel,
+  /// so it is also the only one that cleans it up.
+  ///
+  /// [plugin] can be supplied in tests to avoid the platform plugin chain.
+  /// [throttler] can be supplied in tests to control timing; defaults to a
+  /// production [AlertThrottler] with the standard 2-second window.
+  factory NetworkNotifier.network({
+    FlutterLocalNotificationsPlugin? plugin,
+    AlertThrottler? throttler,
+    VoidCallback? onTap,
+  }) => NetworkNotifier._(
+    notificationId: networkNotificationId,
+    channelId: _networkChannelId,
+    channelName: _networkChannelName,
+    channelDescription: 'Live HTTP activity captured by Flutter Inspector',
+    ongoing: true,
+    deleteLegacy: true,
+    plugin: plugin,
+    throttler: throttler,
+    onTap: onTap,
+  );
+
+  /// Creates the notifier for crash alerts.
+  ///
+  /// Every difference from [NetworkNotifier.network] follows from crashes being
+  /// *discrete events* rather than a continuously updated summary: its own id
+  /// (so a crash alert never overwrites the network summary, or vice versa),
+  /// its own channel (so either category can be silenced alone), `ongoing:
+  /// false` (so the alert can be swiped away), and no legacy-channel deletion
+  /// (that channel only ever belonged to the network summary).
+  factory NetworkNotifier.crash({
+    FlutterLocalNotificationsPlugin? plugin,
+    AlertThrottler? throttler,
+    VoidCallback? onTap,
+  }) => NetworkNotifier._(
+    notificationId: crashNotificationId,
+    channelId: _crashChannelId,
+    channelName: _crashChannelName,
+    channelDescription: 'Uncaught errors captured by Flutter Inspector',
+    ongoing: false,
+    deleteLegacy: false,
+    plugin: plugin,
+    throttler: throttler,
+    onTap: onTap,
+  );
 
   /// Whether the notifier successfully initialised and can post notifications.
   bool get isAvailable => _available;
@@ -89,6 +171,9 @@ class NetworkNotifier {
   /// older API level, missing permission) is caught and logged so it never
   /// affects [_available] or the overall init flow.
   Future<void> _deleteLegacyChannel() async {
+    // Only the network notifier ever owned the legacy channel; running this
+    // from the crash notifier would be a meaningless platform call.
+    if (!_deleteLegacy) return;
     try {
       await _plugin
           .resolvePlatformSpecificImplementation<
@@ -141,16 +226,26 @@ class NetworkNotifier {
   /// - Darwin: `presentBanner: false` → content update only, no banner.
   ///
   /// Both states keep the channel at HIGH importance (channel level must not
-  /// change between calls) and `ongoing: true` / `playSound: false`.
+  /// change between calls) and `playSound: false`.
+  ///
+  /// [ongoing] defaults to `true` (the network summary is a persistent
+  /// notification). Crash alerts pass `false` so the entry can be dismissed.
   @visibleForTesting
-  static NotificationDetails buildDetails({required bool alert}) {
+  static NotificationDetails buildDetails({
+    required bool alert,
+    bool ongoing = true,
+    String channelId = _networkChannelId,
+    String channelName = _networkChannelName,
+    String channelDescription =
+        'Live HTTP activity captured by Flutter Inspector',
+  }) {
     final androidDetails = AndroidNotificationDetails(
-      _channelId,
-      _channelName,
-      channelDescription: 'Live HTTP activity captured by Flutter Inspector',
+      channelId,
+      channelName,
+      channelDescription: channelDescription,
       importance: Importance.high,
       priority: Priority.high,
-      ongoing: true,
+      ongoing: ongoing,
       onlyAlertOnce: !alert,
       silent: !alert,
       playSound: false,
@@ -168,6 +263,16 @@ class NetworkNotifier {
       macOS: darwinDetails,
     );
   }
+
+  /// [buildDetails] applied to this notifier's own category, so neither send
+  /// path has to restate the identity chosen by its factory.
+  NotificationDetails _details({required bool alert}) => buildDetails(
+    alert: alert,
+    ongoing: _ongoing,
+    channelId: _channelId,
+    channelName: _channelName,
+    channelDescription: _channelDescription,
+  );
 
   /// Posts or updates the single network notification with [entry] and the
   /// running [totalCount]. No-op when the notifier is unavailable.
@@ -191,11 +296,47 @@ class NetworkNotifier {
         id: _notificationId,
         title: 'Network · $totalCount calls',
         body: '[${entry.method}] ${entry.url} · $status',
-        notificationDetails: buildDetails(alert: alert),
+        notificationDetails: _details(alert: alert),
       );
     } catch (e) {
       debugPrint('[FlutterInspector] notification update failed: $e');
     }
+  }
+
+  /// Posts a crash alert describing [exceptionType] and [message].
+  ///
+  /// Mirrors [showOrUpdate]'s guard order exactly: the availability check runs
+  /// first so an unavailable notifier never consumes a throttle slot. Repeated
+  /// crashes within the throttle window still update the notification content;
+  /// only the heads-up re-alert is suppressed.
+  Future<void> showCrash({
+    required String exceptionType,
+    required String message,
+  }) async {
+    if (!_available) return;
+    final alert = _throttler.shouldAlert();
+    try {
+      await _plugin.show(
+        id: _notificationId,
+        title: 'Crash · $exceptionType',
+        body: _summarize(message),
+        notificationDetails: _details(alert: alert),
+      );
+    } catch (e) {
+      debugPrint('[FlutterInspector] crash notification failed: $e');
+    }
+  }
+
+  /// Collapses [message] to a single line capped at [_maxBodyLength]; a system
+  /// notification shows only a couple of lines, and multi-line stack-like text
+  /// renders badly.
+  @visibleForTesting
+  static String summarize(String message) => _summarize(message);
+
+  static String _summarize(String message) {
+    final single = message.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (single.length <= _maxBodyLength) return single;
+    return '${single.substring(0, _maxBodyLength - 1)}…';
   }
 
   /// Cancels the network notification, if any.

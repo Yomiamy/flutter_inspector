@@ -43,6 +43,20 @@ class FlutterInspector {
   /// prompts they didn't ask for).
   final bool showNetworkNotification;
 
+  /// Whether to surface a system notification when an uncaught error is
+  /// captured. Defaults to `false` so apps opt in explicitly.
+  ///
+  /// **Requires [captureUncaughtErrors] (or a manual [setupErrorHandlers]
+  /// call).** Without the error hooks attached there is nothing to notify
+  /// about, so this flag alone has no effect — it is deliberately not made to
+  /// enable capture on its own, since installing global error hooks is the
+  /// host's decision.
+  ///
+  /// Alerts are throttled independently of [showNetworkNotification], and use
+  /// their own notification id and channel, so a crash alert never replaces
+  /// the network summary.
+  final bool showCrashNotification;
+
   /// Navigator key used to route to the dashboard.
   ///
   /// This is **required**: [openDashboard] resolves its [BuildContext] from
@@ -218,6 +232,7 @@ class FlutterInspector {
     this.customTabTitle = 'Custom',
     this.magicalTapCount = 5,
     this.showNetworkNotification = false,
+    this.showCrashNotification = false,
     required this.navigatorKey,
     this.captureUncaughtErrors = false,
     this.captureLifecycleEvents = false,
@@ -226,6 +241,7 @@ class FlutterInspector {
     this.slowRequestThreshold = const Duration(seconds: 2),
     int bufferSize = 500,
     NetworkNotifier? notifier,
+    NetworkNotifier? crashNotifier,
     List<DatabaseBrowserSource>? databaseSources,
     List<KeyValueBrowserSource>? keyValueSources,
   }) {
@@ -238,7 +254,15 @@ class FlutterInspector {
     }
     _overlayManager = InspectorOverlayManager(onFabTap: (_) => openDashboard());
     _registry = InspectorRegistry(bufferSize: bufferSize);
-    _uncaughtErrorHandler = UncaughtErrorHandler(onLog: log);
+    // Notifications hang off the error handler's own callback rather than
+    // log(): only uncaught errors should alert, not a host's manual
+    // log(level: error) call.
+    _uncaughtErrorHandler = UncaughtErrorHandler(
+      onLog: (message, {required level, stackTrace, data}) {
+        log(message, level: level, stackTrace: stackTrace, data: data);
+        if (showCrashNotification) _notifyCrash(message, data);
+      },
+    );
     if (captureUncaughtErrors) setupErrorHandlers();
     _lifecycleHandler = LifecycleHandler(
       onLog: log,
@@ -257,11 +281,50 @@ class FlutterInspector {
     if (showNetworkNotification) {
       _initNetworkNotifier(notifier: notifier);
     }
+    if (showCrashNotification) {
+      _initCrashNotifier(notifier: crashNotifier);
+    }
+  }
+
+  /// Crash notifier. Assigned synchronously (before `init()` is awaited) so
+  /// this field is never null once the constructor returns.
+  ///
+  /// **This does not make startup crashes notify.** The notifier stays
+  /// unavailable until `init()` resolves, so [NetworkNotifier.showCrash]
+  /// no-ops during that window either way — the assignment order only moves
+  /// where the call stops, not whether a notification appears. Fixing the
+  /// window for real needs queue-and-flush; it is a documented known
+  /// limitation instead. See `docs/features/2026-09-06-crash-notification.md`
+  /// §6.5.
+  NetworkNotifier? _crashNotifier;
+
+  /// The crash notifier, exposed so tests can assert it is assigned
+  /// synchronously (before [NetworkNotifier.init] is awaited).
+  @visibleForTesting
+  NetworkNotifier? get crashNotifierForTesting => _crashNotifier;
+
+  Future<void> _initCrashNotifier({NetworkNotifier? notifier}) async {
+    final crash =
+        notifier ??
+        // Tapping a crash alert opens the Console tab — that is where the
+        // error and its stack trace landed.
+        NetworkNotifier.crash(onTap: () => openDashboard(initialIndex: 0));
+    _crashNotifier = crash;
+    await crash.init();
+  }
+
+  void _notifyCrash(String message, Map<String, dynamic>? data) {
+    _crashNotifier?.showCrash(
+      exceptionType: data?['exceptionType']?.toString() ?? 'Error',
+      message: message,
+    );
   }
 
   Future<void> _initNetworkNotifier({NetworkNotifier? notifier}) async {
     final networkNotifier =
-        notifier ?? NetworkNotifier(onTap: _openNetworkFromNotification);
+        notifier ??
+        // Tapping the network summary opens the Network tab.
+        NetworkNotifier.network(onTap: () => openDashboard(initialIndex: 1));
     await networkNotifier.init();
     // Wire onAdd only after init() resolves. init() never rejects (it catches
     // and swallows platform errors internally), so this callback always runs.
@@ -395,11 +458,6 @@ class FlutterInspector {
     final context = navigatorKey.currentContext;
     if (context == null) return;
     DashboardModal.show(context, this, initialIndex: initialIndex);
-  }
-
-  /// Opens the dashboard on the Network tab in response to a notification tap.
-  void _openNetworkFromNotification() {
-    openDashboard(initialIndex: 1);
   }
 
   /// Clears all console logs.
