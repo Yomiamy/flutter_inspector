@@ -311,9 +311,7 @@ class FlutterInspector {
   }
 
   void _notifyCrash(String message, Map<String, dynamic>? data) {
-    final notifier = _crashNotifier;
-    if (notifier == null) return;
-    notifier.showCrash(
+    _crashNotifier?.showCrash(
       exceptionType: data?['exceptionType']?.toString() ?? 'Error',
       message: message,
     );
