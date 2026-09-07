@@ -9,6 +9,49 @@ import 'alert_throttler.dart';
 /// it explicitly. All platform calls degrade safely: if initialisation or
 /// permission fails, the notifier silently becomes a no-op instead of crashing.
 class NetworkNotifier {
+  /// Notification id of the network summary.
+  @visibleForTesting
+  static const int networkNotificationId = 0x6E657477; // 'netw'
+
+  /// Notification id of a crash alert.
+  @visibleForTesting
+  static const int crashNotificationId = 0x63726173; // 'cras'
+
+  static const String _networkChannelId = 'flutter_inspector_network_v2';
+  static const String _networkChannelName = 'Network Inspector';
+
+  static const String _crashChannelId = 'flutter_inspector_crash';
+  static const String _crashChannelName = 'Crash Inspector';
+
+  // The old channel ID used before T3. Kept as a named constant so the
+  // deletion call below is self-documenting and easy to search/grep.
+  // Android only: on init(), this channel is deleted so the system settings
+  // page does not accumulate orphan channels.
+  static const String _legacyChannelId = 'flutter_inspector_network';
+
+  /// Cap for a notification body; the shade shows only a couple of lines.
+  static const int _maxBodyLength = 120;
+
+  /// Invoked when the user taps the notification (payload routing handled by
+  /// the owner, e.g. opening the Network tab).
+  final VoidCallback? onTap;
+
+  final FlutterLocalNotificationsPlugin _plugin;
+  final AlertThrottler _throttler;
+
+  /// Identifies this notifier's single notification. Distinct per category so
+  /// the network summary and a crash alert coexist instead of replacing one
+  /// another.
+  final int _notificationId;
+  final String _channelId;
+  final String _channelName;
+  final String _channelDescription;
+  final bool _ongoing;
+  final bool _deleteLegacy;
+
+  bool _initialized = false;
+  bool _available = false;
+
   /// The single point where a notifier is actually built. Every category goes
   /// through here, so the identity of a notification (id, channel, ongoing,
   /// legacy cleanup) is chosen in exactly one place per category and can never
@@ -80,46 +123,6 @@ class NetworkNotifier {
     throttler: throttler,
     onTap: onTap,
   );
-
-  /// Invoked when the user taps the notification (payload routing handled by
-  /// the owner, e.g. opening the Network tab).
-  final VoidCallback? onTap;
-
-  final FlutterLocalNotificationsPlugin _plugin;
-  final AlertThrottler _throttler;
-
-  /// Identifies this notifier's single notification. Distinct per category so
-  /// the network summary and a crash alert coexist instead of replacing one
-  /// another.
-  final int _notificationId;
-  final String _channelId;
-  final String _channelName;
-  final String _channelDescription;
-  final bool _ongoing;
-  final bool _deleteLegacy;
-
-  /// Notification id of the network summary.
-  @visibleForTesting
-  static const int networkNotificationId = 0x6E657477; // 'netw'
-
-  /// Notification id of a crash alert.
-  @visibleForTesting
-  static const int crashNotificationId = 0x63726173; // 'cras'
-
-  static const String _networkChannelId = 'flutter_inspector_network_v2';
-  static const String _networkChannelName = 'Network Inspector';
-
-  static const String _crashChannelId = 'flutter_inspector_crash';
-  static const String _crashChannelName = 'Crash Inspector';
-
-  // The old channel ID used before T3. Kept as a named constant so the
-  // deletion call below is self-documenting and easy to search/grep.
-  // Android only: on init(), this channel is deleted so the system settings
-  // page does not accumulate orphan channels.
-  static const String _legacyChannelId = 'flutter_inspector_network';
-
-  bool _initialized = false;
-  bool _available = false;
 
   /// Whether the notifier successfully initialised and can post notifications.
   bool get isAvailable => _available;
@@ -329,8 +332,6 @@ class NetworkNotifier {
   /// renders badly.
   @visibleForTesting
   static String summarize(String message) => _summarize(message);
-
-  static const int _maxBodyLength = 120;
 
   static String _summarize(String message) {
     final single = message.replaceAll(RegExp(r'\s+'), ' ').trim();

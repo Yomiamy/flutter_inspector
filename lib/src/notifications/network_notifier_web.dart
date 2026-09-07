@@ -10,6 +10,18 @@ import 'alert_throttler.dart';
 /// while keeping `flutter_local_notifications` (which transitively imports
 /// `dart:io`) out of the web import graph for WASM compatibility.
 class NetworkNotifier {
+  /// Notification id of the network summary. Mirrors the native constant so
+  /// shared code and tests can reference it on web.
+  @visibleForTesting
+  static const int networkNotificationId = 0x6E657477; // 'netw'
+
+  /// Notification id of a crash alert.
+  @visibleForTesting
+  static const int crashNotificationId = 0x63726173; // 'cras'
+
+  /// Invoked when the user taps the notification. Never fires on web.
+  final VoidCallback? onTap;
+
   /// Creates a no-op notifier. Parameters mirror the native implementation so
   /// call sites compile unchanged; [plugin] is accepted but never used.
   NetworkNotifier._({this.onTap});
@@ -27,18 +39,6 @@ class NetworkNotifier {
     AlertThrottler? throttler,
     VoidCallback? onTap,
   }) => NetworkNotifier._(onTap: onTap);
-
-  /// Invoked when the user taps the notification. Never fires on web.
-  final VoidCallback? onTap;
-
-  /// Notification id of the network summary. Mirrors the native constant so
-  /// shared code and tests can reference it on web.
-  @visibleForTesting
-  static const int networkNotificationId = 0x6E657477; // 'netw'
-
-  /// Notification id of a crash alert.
-  @visibleForTesting
-  static const int crashNotificationId = 0x63726173; // 'cras'
 
   /// Always `false`: notifications are not supported on the web build.
   bool get isAvailable => false;
