@@ -180,6 +180,15 @@
                 寫入 LogInspector RingBuffer
                               │
                               ▼
+              [選用] showCrashNotification 是否開啟？
+                              │ (Yes)
+                              ▼
+              推送 crash 系統通知（NetworkNotifier.crash()）
+              · 獨立 id/channel，不覆蓋網路摘要通知
+              · 自有 AlertThrottler，不消耗網路通知節流額度
+              · 走在 log 之後，自動繼承既有雙擊去重
+                              │
+                              ▼
                    是否存在 Host 原始 Handler？
                     ╱                      ╲
                   (Yes)                    (No)
@@ -191,6 +200,7 @@
 ```
 
 - **安全防護機制**：寫入日誌的邏輯完全置於 `try-catch` 中。在 `finally` 中將控制權回傳至下游原始 Handler，即使除錯套件日誌寫入失敗，主 App 亦絕不崩潰。
+- **Crash 系統通知（`showCrashNotification`，預設關閉）**：掛在 `UncaughtErrorHandler` 的 `onLog` callback，**不是**公開的 `FlutterInspector.log()`——掛在後者會讓宿主自己的 `log(level: error)` 也跳通知。需與 `captureUncaughtErrors` 搭配使用（hook 未掛載則無事件可通知），套件刻意不代為開啟。**已知限制**：`init()` 為非同步平台呼叫，其完成前的空窗期 crash 只寫 log、不發通知（判定為 edge case，不排程修正）。
 
 ---
 

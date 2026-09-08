@@ -55,8 +55,8 @@
 | :--- | :--- | :--- |
 | [`lib/src/notifications/alert_throttler.dart`](../../lib/src/notifications/alert_throttler.dart) | `AlertThrottler` | 限制通知頻率，為 Heads-up Notification 提供 2 秒的冷卻限制以減少視覺噪音。 |
 | [`lib/src/notifications/network_notifier.dart`](../../lib/src/notifications/network_notifier.dart) | - | 平台導出分流器。採用 Conditional Exports 設計，在 Web 載入 no-op，Native 載入 io 實作。 |
-| [`lib/src/notifications/network_notifier_io.dart`](../../lib/src/notifications/network_notifier_io.dart) | `NetworkNotifier` (Native) | 使用 `flutter_local_notifications` 顯示網絡請求通知，點擊可呼叫控制台。 |
-| [`lib/src/notifications/network_notifier_web.dart`](../../lib/src/notifications/network_notifier_web.dart) | `NetworkNotifier` (Web) | Web 端 no-op 實現，阻斷 `dart:io` 防止破壞 WASM 編譯。 |
+| [`lib/src/notifications/network_notifier_io.dart`](../../lib/src/notifications/network_notifier_io.dart) | `NetworkNotifier` (Native) | 使用 `flutter_local_notifications` 推送通知，點擊可喚起控制台。通知身分（id / channel）已參數化為實例欄位，由 `NetworkNotifier.network()` 與 `NetworkNotifier.crash()` 兩個對稱工廠決定——前者為持續更新的網路摘要（`ongoing`），後者為離散的崩潰告警，兩者各持有自己的 `AlertThrottler`，互不覆蓋亦互不消耗節流額度。 |
+| [`lib/src/notifications/network_notifier_web.dart`](../../lib/src/notifications/network_notifier_web.dart) | `NetworkNotifier` (Web) | Web 端 no-op 實現，阻斷 `dart:io` 防止破壞 WASM 編譯。須與 io 側維持雙向簽章一致（含 `network()` / `crash()` 兩工廠與 `showCrash`），否則 Web build 崩潰且單元測試無法捕捉。 |
 
 ### 5. 無狀態工具層 (`lib/src/utils/`)
 
