@@ -1,3 +1,5 @@
+
+
 # 🔍 Flutter Inspector
 
 [![pub package](https://img.shields.io/pub/v/flutter_inspector_kit.svg)](https://pub.dev/packages/flutter_inspector_kit)
@@ -73,7 +75,7 @@ final inspector = FlutterInspector(
   // Required: the dashboard is opened through this key.
   navigatorKey: navigatorKey,
   // Optional: configure threshold for marking requests as "🐢 SLOW" (defaults to 2s)
-  slowRequestThreshold: const Duration(seconds: 3),
+  slowRequestThreshold: const Duration(seconds 3),
 );
 
 void main() => runApp(const MyApp());
@@ -476,7 +478,7 @@ final inspector = FlutterInspector(
 );
 ```
 
-This wires three standard Flutter hooks — `FlutterError.onError` (build/layout/paint errors), `PlatformDispatcher.instance.onError` (uncaught async errors, including unawaited `Future` errors), and `ErrorWidget.builder` (which widget failed to build). Together they cover framework, asynchronous and build-time errors without wrapping `runApp` in a custom zone, so there is no `Zone mismatch` to manage.
+This wires three standard Flutter hooks — `FlutterError.onError` (build/layout/paint errors), `PlatformDispatcher.instance.onError` (synchronous uncaught errors), and `ErrorWidget.builder` (which widget failed to build). Together they cover framework, asynchronous and build-time errors without wrapping `runApp` in a custom zone, so there is no `Zone mismatch` to manage.
 
 > **Errors are never swallowed.** Every hook **chains/wraps** your existing handler rather than replacing it: the inspector records the error and then forwards it downstream (your handler, or Flutter's default presentation — debug red screen / release grey screen unchanged). The capture is purely additive.
 
