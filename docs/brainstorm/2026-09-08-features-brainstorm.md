@@ -3,6 +3,7 @@
 > **建立日期**：2026-06-25（原始檔名）
 >
 > **📝 更新紀錄 (Changelog)**：
+> * **2026-09-08**：**§P21 附加 ImageCache 水位案（Issue #158）實作完成後整案撤回**——原想在 memory pressure 那筆 warning 尾巴附上 `imageCache 98.2 MB/100.0 MB (212 imgs)`，賣點是「水位只有 3 MB 就能排除圖片方向」的否證能力。實作完成、584 測試全綠、analyze 零新增，但 code review 階段以 spy observer 實測發現 **`PaintingBinding.handleMemoryPressure()`（`painting/binding.dart:160`）在通知 observer 之前就 `imageCache.clear()`**，`didHaveMemoryPressure()` 內讀到的分子與張數**恆為 0**（`BEFORE: size=256 count=1` → `INSIDE observer: size=0 count=0`）。功能因此永遠輸出 `imageCache 0 B/...`，賣點反轉為**假否證**（會讓排查者排除正確方向），踩到 Anti-Feature #3「假精度比沒有資訊更糟」的判準，故 branch 重置、零程式碼留下。已查證 3.41.9 與 3.44.1 該兩段程式碼逐字相同（涵蓋整個支援範圍）、真實 OS 事件同路徑、`liveImageCount` 亦為 0。該需求改由**新增的 §P25 ImageCache 水位計**承接（主動查看時讀取，不綁 OS 事件）。同時新增「2026-09-08 記憶體觀測選項全面評估」表（RSS+Swap / LMK / bitmap 對齊 / 兩種水位讀法共五項逐一判定）與 §P21 的 `onTrimMemory` deprecation 風險註記。**本案的方法論教訓已寫入 §P21 撤回紀錄：查證「API 存在且可讀」不等於查證「在我要讀的那個時點，讀到的值有意義」。** 檔名日期前綴由 `2026-09-01` 更新至 `2026-09-08`。
 > * **2026-09-04**：**官方 `dart-lang/leak_tracker` 深度評估與架構裁決**——針對官方記憶體洩漏分析套件深入研究其運作機制（Flutter `MemoryAllocations`、`Finalizer`、`WeakReference`、`reachabilityBarrier`、`vm_service`）、執行時期代價（`forceGC` 之激進記憶體分配造成的嚴重 Jank、定時輪詢與堆疊捕獲開銷）及跨平台限制（Web/WASM 下 Retaining Path 為 null、無法建立 VM Service WebSocket、`reachabilityBarrier` 不可用）。從 Linus 模式五層分解進行裁決，確立「堅決拒絕 Direct In-App 內建整合」的鐵律，更新第 2 節矩陣評分，增補第 3 節「核心決策三：拒絕 In-App 記憶體洩漏追蹤」，並提供純記錄導向之可選適配（Adapter/Recipe）規範。
 > * **2026-09-04**：**§P21 記憶體壓力事件完成**——PR #155 合入 main（issue #154）。落地形式與原提案的差異只有一處：原本「二擇一待定」的旗標選擇**已裁決併入既有 `captureLifecycleEvents`**，不新增 `captureMemoryPressure`——兩者是同一個 observer 上的 callback、共用同一組 attach/detach，拆兩個旗標只是多一個特殊情況。其餘照提案落地：`LifecycleHandler` 多覆寫一個 `didHaveMemoryPressure()`，記為 `LogLevel.warning`（非 info——這是 OOM/LMK 前導信號，必須能被既有 warning/error 過濾撈起來，不能沉在資訊流裡），沿用既有 `topPageLabel` 後綴，零新增 Entry/Inspector/RingBuffer、零新相依。callback 內以 try-catch 包住：本套件 SDK 下限（Flutter >=3.10.0）的 `handleMemoryPressure()` 逐一走訪 observer 且**無** per-observer try-catch（per-observer 保護是 3.44.0 才加入），逸出的例外會中斷廣播、波及排在後面的每個 observer。`example/` 另補一顆 `Simulate Memory Pressure` 按鈕（走 `WidgetsBinding.instance.handleMemoryPressure()`，與 OS 真實回報同一條 observer 廣播路徑）。檔名日期前綴由 `2026-09-01` 更新至 `2026-09-04`。
 > * **2026-08-28**：**新增第六部分：開源除錯與日誌生態套件全面評估與整合策略**——針對社群主流除錯與日誌套件（涵蓋 talker_flutter, logger, alice/chucker_flutter, flutter_mxlogger, logging, logarte, stack_trace, flutter_ume, catcher 等 20+ 套件）進行 4 大維度深度評估（架構相容性、輕量與效能、UI/UX 視覺呈現、社群活力與穩定度）。以 Linus 模式核心判斷「拒絕重型黑盒全家桶替換核心、嚴守 Anti-Features（拒絕本機落盤與強依賴注入）」，並提出 4 項高 ROI、零新相依的務實整合提案（§P16 生態適配器 LogOutput/TalkerObserver、§P17 原生折疊 JSON 樹狀檢視器、§P18 輕量網路效能統計條、§P19 StackTrace 非同步鏈正規化）。
@@ -26,9 +27,13 @@
 
 ---
 
-## 📊 完成度總覽（截至 2026-09-01 · v2.4.0）
+## 📊 完成度總覽（截至 2026-09-06 · v2.4.0）
 
 > 以下狀態依實際 codebase 與 git history 核對標注。✅ 完成 ｜ 🟡 部分完成 ｜ ⬜ 未實作。
+>
+> **📝 更新（2026-09-06）**：新增 **§P24 Crash 系統通知**（Issue #156，已完成），
+> 並連帶讓 **§P11 NetworkNotifier 重構**落地——§P11 原記「應與 §P1 綁定排程」，
+> 但 §P24 成為它先一步的消費者，該綁定關係已解除且前提已就緒。
 >
 > **📝 實查校正 (2026-08-06)**：對照 codebase 逐項核對 Tier 4，修正兩處與實況不符的記載——
 > * **§P8 慢請求標記**：文件原標 🆕 待辦，**實為已完成**（PR #111 / Issue #110）。
@@ -669,7 +674,15 @@ ENTRIES: [NavigatorAction.push/NetworkDetailView, NavigatorAction.push/SizedBox]
 * **Effort**：low（邏輯本身簡單）但**接線成本非零**——需要開發者手動幫可疑 widget 加 mixin，不是一個 `flag: true` 就全解決；這點要在 README 講清楚，避免被誤期待成自動偵測。
 * **排查價值**：⭐⭐⭐（見效但受眾窄：只有「懷疑某 widget 有 rebuild bug」時才會主動用）
 
-### §P11. 多告警類型重構 NetworkNotifier（§P1 的後端支撐）— 🆕
+### §P11. 多告警類型重構 NetworkNotifier（§P1 的後端支撐）— ✅ 已完成（隨 §P24 落地 · Issue #156 · 2026-09-06）
+
+> **✅ 落地更新（2026-09-06）**：本重構已隨 **§P24 Crash 系統通知**一併完成。
+> 下方「應與 §P1 綁定排程」的結論**已過時**——§P1 並非本重構的唯一消費者，
+> §P24 同樣依賴它，且先一步動工。實際落地範圍與本節設計一致：
+> `_notificationId` / `_channelId` / `_channelName` 已參數化為 `final` 實例欄位，
+> 新增 `NetworkNotifier.crash()` 具名建構式，`showOrUpdate()` 公開簽章不變、
+> 既有測試零修改（34 tests 未改動即全綠）。
+> **§P1 若日後動工，本前提已就緒，無需重做。**
 
 > **痛點**：§P1「錯誤爆發偵測」設想用既有系統通知基建做背景告警，但查核發現 `NetworkNotifier` 目前寫死「單一持續更新通知」（固定 notification id + channel）。**⚠️ 實查校正（2026-08-23）**：原句後半「`AlertThrottler` 是它的私有欄位，不是共用元件」**已過時**——`network_notifier_io.dart:19,22` 已支援建構式注入（`AlertThrottler? throttler`，預設 `?? AlertThrottler()`），`_web` 分支簽章一致，持有關係無需再動。**本項真正剩餘的缺口只有 `:31` `_notificationId` 與 `:33` `_channelId` 兩個私有常數的參數化**，effort 應由 low 下修為 trivial~low。§P1 若直接動工會被迫在 `NetworkNotifier` 內部長出 if/else 分支去區分「網路摘要」與「錯誤爆發」兩種通知語意——這正是「特殊情況」的壞味道。
 
@@ -821,7 +834,7 @@ ENTRIES: [NavigatorAction.push/NetworkDetailView, NavigatorAction.push/SizedBox]
 |:---:|------|:---:|:---:|------|
 | ~~1~~ | §P13 App 前景/背景切換標記 — ✅ **已完成（PR #100）** | low | ⭐⭐⭐⭐ | 免費疊加在既有 Timeline，性價比最高；額外附加 top-most page（型態 + path）解洗頻問題 |
 | ~~2~~ | ~~§P10 Rebuild 異常偵測~~ | ~~low（但需使用者接線）~~ | ~~⭐⭐⭐~~ | ❌ 已取消——價值太窄，opt-in per-widget 接線成本與收益不成比例 |
-| **3** | §P11 NetworkNotifier 重構 | low | ⭐⭐⭐（解鎖 §P1） | 應與 §P1 綁定排程，不單獨動工 |
+| ~~**3**~~ | ~~§P11 NetworkNotifier 重構~~ | ~~low~~ | ⭐⭐⭐（解鎖 §P1） | ✅ **已完成**（隨 §P24 落地，Issue #156）——原「與 §P1 綁定」的結論已過時，§P24 才是先動工的消費者 |
 | **4** | **§P15 鍵值儲存檢視器（KV Browser）** | medium | ⭐⭐⭐⭐⭐ | **2026-08-14 新增**。QA 排查「狀態卡住」問題的最高 ROI 工具；host-injection pattern 第四次複用，零新相依 |
 | — | ~~§P14 Breadcrumb 標記 `inspector.mark()`~~ | trivial | — | **降級不單獨排程**：與 `log()` 無功能差異，是渲染差異非資訊差異；與 §P7 綁定或直接用 emoji 約定取代（見 §P14） |
 | — | ~~§D5 Redaction 涵蓋缺口修復~~ | — | — | **不排程**：debug 工具應資訊越詳細越好，遮罩是排查絆腳石；既有實作保留不動（見 §D5） |
@@ -1159,15 +1172,103 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
 * **次要**：Web 平台 `FrameTiming` 上報不完整，需明講降級（不 crash 但「四平台一致」在 Web 打折）；`TimelineSource` enum 加 jank 要同步 `mergedTimeline` / console_tab filter chip 三處。
 * **Effort**：low~medium ｜ **排查價值**：⭐⭐⭐⭐⭐（對齊 Core Vital，鏈推斷價值最高）
 
-### §P21. 記憶體壓力事件（`captureMemoryPressure`）— 🆕 最省
+### §P21. 記憶體壓力事件（併入 `captureLifecycleEvents`）— ✅ 已完成（PR #155）
 
 * **痛點**：Memory usage（RSS+Swap / Bitmap）Feb 2027 強制。真正的 RSS 數值需 platform channel（粗糙且跨平台不一），但 **OOM/LMK 前的「記憶體壓力」是 Dart 層唯一拿得到的前導信號**。
 * **好品味設計**：
   > `WidgetsBindingObserver.didHaveMemoryPressure()` 是 Flutter SDK 內建回呼，而 kit 的 `LifecycleHandler` 已經是 observer——**多接一個 callback 即可**，寫進既有 log／lifecycle 時間軸，不新增 Entry/Inspector/RingBuffer。
-* **公開 API**：`bool captureMemoryPressure = false`（或直接併入既有 `captureLifecycleEvents`——記憶體壓力與前景/背景切換同屬「生命週期觀測」語意，共用同一個 `WidgetsBindingObserver`）。二擇一待定。
+* **公開 API**：**已裁決併入既有 `captureLifecycleEvents`**，不新增 `captureMemoryPressure` 旗標——兩者是同一個 `WidgetsBindingObserver` 上的 callback、共用同一組 attach/detach 生命週期，拆兩個旗標只是多一個特殊情況。
 * **重用**：`LifecycleHandler` 既有 observer + 既有 log 維度。零新相依。
 * **鏈推斷價值**：把 OOM 前唯一的 Dart 層前導信號插進時間軸，讓 crash 前的 memory pressure 與其之前的 network/route/db 並排，讀出「壓力密集出現在載入大圖之後」這種因果推斷。
 * **Effort**：trivial ｜ **排查價值**：⭐⭐⭐⭐（強化既有維度，零風險，建議當暖身第一項）
+
+#### ❌ 曾嘗試強化並整案撤回：附加 ImageCache 水位（Issue #158 · 2026-09-08）
+
+> **結論先講**：**這條路不通，別再提**。不是實作沒做好——實作做完了、584 測試全綠、
+> analyze 零新增，是**功能的前提被 SDK 行為打穿**。Issue #158 的分支已重置，零程式碼留下。
+
+**原提案**：在既有那筆 warning 的訊息尾巴附上事件當下的 ImageCache 水位——
+
+```
+現況：Memory pressure · HomePage (/home)
+提案：Memory pressure · HomePage (/home) · imageCache 98.2 MB/100.0 MB (212 imgs)
+```
+
+賣點是**否證能力**：水位只有 3 MB 就能當場排除圖片方向，省下翻圖片程式碼的時間。
+「排除一個方向與指出一個方向同等有用」——這個論點本身沒錯，錯的是它建立在
+「pressure 當下讀得到有意義的水位」這個**未經查證的假設**上。
+
+**死因：`PaintingBinding` 在通知 observer 之前就把快取清空了。**
+
+```dart
+// packages/flutter/lib/src/painting/binding.dart:160
+@override
+void handleMemoryPressure() {
+  super.handleMemoryPressure();
+  imageCache.clear();                      // ← 先清空
+}
+
+// packages/flutter/lib/src/widgets/binding.dart:1372
+@override
+void handleMemoryPressure() {
+  super.handleMemoryPressure();            // ← 這一步走到上面那個 clear()
+  for (final observer in List.of(_observers)) {
+    observer.didHaveMemoryPressure();      // ← 才輪到我們讀
+  }
+}
+```
+
+關鍵在 mixin 順序：`WidgetsFlutterBinding` 的清單是
+`... PaintingBinding, SemanticsBinding, RendererBinding, WidgetsBinding`，
+**`WidgetsBinding` 在最後、其覆寫最先執行**，而它第一件事就是 `super`——
+往前走到 `PaintingBinding` 執行 `imageCache.clear()`。清空完成後，才輪到通知 observer。
+
+**實測證據**（spy observer 讀同一個 cache 實例，非推論）：
+
+```
+BEFORE pressure:  size=256  count=1
+INSIDE observer:  size=0    count=0      ← didHaveMemoryPressure() 讀到的
+AFTER  pressure:  size=0    count=0
+```
+
+**後果是功能價值歸零，且反轉為危害**：該功能永遠只會輸出
+`imageCache 0 B/100.0 MB (0 imgs)`——分子與張數恆為 0，唯一有值的是分母
+（`maximumSizeBytes`，`clear()` 不動它）。於是原本的兩列判別塌成一列：
+
+| 原設計預期顯示 | 實際永遠顯示 | 排查者會得到的結論 |
+|:---|:---|:---|
+| `98.2 MB/100.0 MB` → 圖片層有事 | — | 永遠看不到 |
+| `3.1 MB/100.0 MB` → 不是圖片 | `0 B/100.0 MB` | **「不是圖片問題」——即使圖片正是問題** |
+
+這是**假否證**：它會讓排查者主動排除正確的方向。踩到的正是本文件在
+**Anti-Feature #3（拒絕 HAR timing 的假精度）** 與第七部分**拒絕「總記憶體估算值」**
+時用的同一條判準——**假精度比沒有資訊更糟**，因為讀者會照著錯的數字推錯方向。
+
+**已排除的變通方案**（皆實查，非推測）：
+
+| 方案 | 判定 |
+|:---|:---|
+| 改讀 `liveImageCount`（`clear()` 不清 live images） | ❌ 實測在 observer 內同為 **0**，無可用的替代存活指標 |
+| 只在測試環境有問題、真實 OS 事件不同路 | ❌ 不成立。`services/binding.dart:177` 收到系統 `memoryPressure` 訊息後走**同一個** `handleMemoryPressure()`，沒有第二條路徑 |
+| 只是某個 SDK 版本的行為 | ❌ 不成立。3.41.9 與 3.44.1 上述兩段程式碼**逐字相同**，涵蓋 `pubspec.yaml` 宣告的整個支援範圍（`flutter: ">=3.10.0"`） |
+| 覆寫 binding，在 clear 之前取值 | ❌ 要求 host 改用套件提供的 custom binding，破壞「接線零改動」前提，成本遠超價值 |
+
+> **該需求的正確形狀是 §P25（ImageCache 水位計）**——不綁任何 OS 事件，
+> 在使用者主動查看的那一刻讀取，那個時點的值是真的。
+
+**🔴 本案最該記住的教訓（方法論，不是技術細節）**：
+
+規格階段確實做了實查，查證的是「`currentSizeBytes` / `maximumSizeBytes` / `currentSize`
+三個 getter 存在、公開、純 Dart、零相依、O(1)」——**這些全部正確**。
+但**沒有查證「在 `didHaveMemoryPressure()` 這個時點，讀到的值是否有意義」**。
+
+**前者是 API 存在性，後者才是功能可行性。把前者當成後者的證明，就是這次的失誤。**
+review 階段的 mutation testing 之所以能揭穿它，是因為它問的不是「API 在不在」，
+而是「改壞了測試會不會叫」——四個接線 mutation 有三個逃逸，才順藤摸瓜挖出恆零的根因。
+
+> **可執行的防範規則**：日後規格涉及「在特定時點讀取外部狀態」時，
+> **必須實測該時點的值**（寫個 spy/probe 跑一次），不能只確認 API 存在。
+> 這條成本是十幾行拋棄式測試碼，換掉的是一整輪實作 + review + 撤回。
 
 ### §P22. 權限被拒便利方法（`permissionDenied(...)`）— 🆕 弱但有用
 
@@ -1185,6 +1286,85 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
 * **注意**：這必須小心不要變成被否決的「錯誤上下文快照」（§P2，固定挑幾個維度釘在 error 旁 → 預設因果單線）。正解仍是完整 `mergedTimeline`，此項頂多是「crash 時自動觸發既有匯出」，不新增快照機制。
 * **Effort**：low ｜ **排查價值**：⭐⭐⭐（待確認是否與既有診斷報告重疊）
 
+### §P24. Crash 系統通知（Crash Notification）— ✅ 已完成（Issue #156 · 2026-09-06）
+
+* **痛點**：套件僅在 API 呼叫時推送系統通知（`showNetworkNotification`），**崩潰發生時沒有任何系統層級的即時提示**。App 在背景時，QA／開發者完全不知道剛剛發生 crash；即使在前景，也得主動打開 dashboard 才會發現 error 進了 timeline。**網路異常有通知、崩潰卻沒有——這個不對稱沒有正當理由。**
+* **好品味設計（核心洞察）**：
+  > 不要新增 `CrashNotifier` 類別。那會複製一份 init／permission／平台守衛邏輯，且 `_io`/`_web` 雙分支各再多一份——四份檔案的維護成本，換一個「語意不同」的假需求。
+  >
+  > 正解是把「一則通知」的身分（id + channel）參數化，`NetworkNotifier` 就成為這個通用能力的**其中一個呼叫者**，crash 只是**換參數再建一個實例**。
+  - `_notificationId` / `_channelId` / `_channelName` 由 `static const` 改為 `final` 實例欄位，新增 `NetworkNotifier.crash()` 具名建構式（此即 §P11 重構本體）。
+  - crash 與 network 的四點差異，全部從「crash 是**離散事件**而非持續更新的摘要」這一點推導而出：獨立 id（不互相覆蓋）、獨立 channel（可分別靜音）、`ongoing: false`（可滑掉）、不執行 legacy channel 刪除（那只屬於 network）。
+* **公開 API**：建構式旗標 `bool showCrashNotification = false`（對齊既有 `showNetworkNotification` 慣例）。
+  > **刻意不自動開啟 `captureUncaughtErrors`**：安裝全域 error hook 是 host 的決定，套件不代為決定。兩者需搭配使用，已在 dartdoc 明講。
+* **重用**：三個 crash hook（`FlutterError.onError` / `PlatformDispatcher.instance.onError` / `ErrorWidget.builder`）**皆已存在**於 `uncaught_error_handler.dart`，本功能**不新增任何 hook**；`AlertThrottler` 邏輯零修改（crash 持有自己的實例，與 network 節流互不干擾）。
+* **接線點的判斷**：通知掛在 `UncaughtErrorHandler` 的 `onLog` callback，**不是** `FlutterInspector.log()`——後者是公開 API，掛在那裡會讓 host 自己的 `log(level: error)` 也跳通知，那不是「crash 通知」。
+* **自動繼承既有去重**：`UncaughtErrorHandler._lastLoggedDetails` 已處理「`FlutterError.onError` + `ErrorWidget.builder` 對同一錯誤雙擊」，通知走在 log 之後，不需另寫一套。
+* **🔴 實作教訓（條件匯出的驗證方式）**：`_io`/`_web` 簽章漂移是本次最大破壞風險（CLAUDE.md 不變式 #4），而 **`flutter test` 完全抓不到**——測試跑在 VM 上全程走 `_io`，`_web.dart` 根本不會被載入，少一個建構式也能測全綠。
+  > **且 `example/` 不能當關卡**（2026-09-06 實測）：它依賴 ObjectBox（native-only、`dart:ffi`），在該目錄跑 `flutter build web` **永遠失敗且與本功能無關**。正解是建一個只依賴本套件的最小 harness，讓兩個建構式都進編譯圖後 `flutter build web`——**編譯器擋得住，人眼擋不住**。
+* **Effort**：low（實際落地 5 任務）｜ **排查價值**：⭐⭐⭐⭐（補上網路／崩潰的通知不對稱，QA 背景測試場景剛需）
+
+### §P25. ImageCache 水位計（Image Cache Gauge）— 🆕 low priority
+
+> **本項是 Issue #158 那個需求唯一可行的形狀**。該案想在 memory pressure 事件當下讀水位，
+> 但 `PaintingBinding` 在通知 observer 前就清空快取，讀到的恆為 0（完整死因見 §P21 的
+> 撤回紀錄）。**本項不綁任何 OS 事件**——在使用者主動查看的那一刻讀取，那個時點的值是真的。
+
+* **設計方向**：
+  - Dashboard 內常駐顯示 `currentSizeBytes` / `maximumSizeBytes` 與 `currentSize`（張數）
+  - **打開時才讀，不輪詢**（三個 getter 都是 O(1)，沒有輪詢的理由；加輪詢就踩 Anti-Feature #1）
+* **建議位置：Storage tab 內加一區**（`lib/src/ui/dashboard/tabs/storage_tab.dart`）
+  - imageCache 本質是**即時查詢型**，與 CLAUDE.md 不變式 #3 的 Browser Source 分流**同構**
+    ——呼叫時即時拉取、**不進 `RingBuffer`、不進 timeline、不加第五個 `TimelineSource`**
+  - Storage tab 在 host 未註冊 source 時是空的（`flutter_inspector.dart:218` 明載套件不內建
+    任何 `KeyValueBrowserSource`），剛好給它一個永遠有內容的區塊
+  - **🔴 明確不開新的 Performance tab**：為單一 widget 開一個 tab 是過度工程，且會誘導未來
+    往裡塞 FPS／jank 指標，**直接滑向 Anti-Feature #1**。這條先寫死，別日後重議
+* **價值（四項，第 2 項是 §P21 那條路根本給不了的）**：
+  1. **主動量測**，不必等 OS 出手——這才是 Google bitmap memory 頁面實際要求開發者做的事
+  2. **能驗證修改有沒有效**：改 `cacheWidth` / `RGB_565` / 快取上限後，同一頁面改前 98 MB、
+     改後 31 MB，一眼可證。**綁 pressure 事件的做法給不了這個**——就算它讀得到值，
+     修對之後 pressure 就不來了，反而失去量測手段
+  3. **有分母才看得出 LRU thrashing**：`98.2/100.0`（頂到上限、圖片反覆被踢掉又重載，
+     此時 NetworkTab 會看到同一張圖被抓多次，兩條線索互相印證）vs `98.2/500.0`（只是用得多）
+  4. **回收行為可觀察**：切背景再回來、pop 掉圖片牆頁面，看水位有沒有降
+* **🔴 必守的誠實劃界（本項最大風險是誤導，不是技術）**：
+  - 標題**必須寫 "Image Cache"**，不可寫 "Memory" 或 "RAM"
+  - **絕不可湊一個「總記憶體用量」估算值**——WebView 內的圖、native plugin、`dart:ffi`
+    配置的記憶體**全都不在此帳上**（cache 顯示 3 MB 而 app 實吃 800 MB 完全可能）
+  - 判準同 Anti-Feature #3：**假精度比沒有資訊更糟**。§P21 撤回案就是活生生的反例
+* **重用**：`PaintingBinding.instance.imageCache` 三個現成 getter、既有 `formatBytes`
+  （`lib/src/utils/network_formatters.dart:48`，支援 B/KB/MB/GB/TB）。零新相依。
+* **不做**：定時輪詢、歷史曲線、「快取未回收 = 洩漏」的自動判定
+  （LRU 正常行為就會讓水位不降，要判定異常就得堆閾值與例外補丁——那正是 2026-09-04
+  否決 `leak_tracker` 的第 2 層理由，換個包裝而已）
+* **Effort**：low ｜ **排查價值**：⭐⭐⭐
+
+### 📌 2026-09-08 記憶體觀測選項全面評估（Issue #158 期間，避免日後重提）
+
+使用者引用 Google Play 三個 Vitals 頁面（[memory-usage](https://developer.android.com/topic/performance/vitals/memory-usage)
+／[lmk](https://developer.android.com/topic/performance/vitals/lmk)
+／[bitmap-memory-usage](https://developer.android.com/topic/performance/vitals/bitmap-memory-usage)）
+詢問本套件能否做記憶體洩漏警示或顯示記憶體資訊。逐項實查後結論如下，**前四項已否決，勿再提案**：
+
+| 選項 | 判定 | 依據（皆實查，非推測） |
+|:---|:---:|:---|
+| **Anonymous RSS + Swap 數值** | ❌ **拿不到** | Google 官方頁面明載「**No in-app API exists** for reading this metric」，資料由 OS telemetry 收集後經 Play Console 呈現。`ProcessInfo.currentRss`（`dart:io`）存在，但①它是 Dart VM 進程 RSS、非 Google 定義的 anonymous RSS+swap；②本套件**刻意從不引入 `dart:io`**（`lib/src/models/diagnostic_info.dart:41` 明載此為 WASM 相容前提）|
+| **LMK 事件偵測** | ❌ **需 platform channel** | Google 推薦的是 `ApplicationExitInfo` + `REASON_LOW_MEMORY`，為 Kotlin/Java API，語意是「**下次啟動時回讀**上次為何被殺」而非即時信號。Dart 層無對應 binding |
+| **Bitmap memory 宣稱對齊 Play Console** | ❌ **假精度** | `imageCache` 是 Flutter 自己的圖片快取帳面，**不等於** OS 統計的 bitmap memory（後者含 malloc heap、shared memory、graphics buffer）|
+| **ImageCache 水位 — 掛在 memory pressure 事件上** | ❌ **讀到的恆為 0** | `PaintingBinding.handleMemoryPressure()` 在通知 observer 前先 `imageCache.clear()`。Issue #158 實作完成後整案撤回，實測證據見 §P21 撤回紀錄 |
+| **ImageCache 水位 — 使用者主動查看時讀取** | ✅ **可做** | 見上方 §P25。讀取時點由使用者決定，不受 `clear()` 影響 |
+
+> **🔴 判準沿革（引用時務必分辨，否則會推導出錯誤的相鄰結論）**：
+> 本表的否決與 2026-09-04 否決 `leak_tracker` 的**理由完全不同**——
+> - 本表前三項是「**Dart 層拿不到**，或拿到的不是那個東西」（**能力邊界**）
+> - 第四項是「**拿得到，但在那個時點讀到的值無意義**」（**時序問題**）
+> - `leak_tracker` 是「**拿得到，但代價不可接受**」（`forceGC()` 反覆生成長度 30,000 的
+>   List 逼 Full GC、Web 上 Retaining Path 恆為 null、Profile 模式因 `assert` 被消除而靜默失效）
+>
+> 三種否決不可混用。例如「記憶體資訊拿不到」這句話對第四項是**錯的**——它拿得到，
+> 只是讀的時機不對，而那正是 §P25 能成立的原因。
+
 ### ❌ app 內不可觀測（誠實劃界，勿浪費工）
 
 以下 Google 信號的核心部分在 Dart 執行之前、或 OS/build 層，kit **無法觀測**，不應為湊數硬做代理：
@@ -1199,9 +1379,24 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
 
 ### 第七部分優先順序建議
 
-1. **§P21 記憶體壓力**（trivial、強化既有、零風險）→ 暖身首選
+1. ~~**§P21 記憶體壓力**（trivial、強化既有、零風險）→ 暖身首選~~ → **✅ 已完成（PR #155）**。
+   Issue #158 曾嘗試為它附加 ImageCache 水位以補強收斂能力，**實作完成後因 SDK 行為整案撤回**
+   （`PaintingBinding` 先清快取才通知 observer，讀到的恆為 0；死因與實測見上方 §P21 撤回紀錄）。
+   該需求改由 **§P25 水位計**承接（low priority，主動查看時讀取，不綁 OS 事件）
 2. **§P20 掉幀維度**（旗艦、對齊 Core Vital、鏈推斷價值最高）→ **⚠️ 目前為「待裁決」而非待辦**：與 Anti-Feature #1（2026-08-14 覆核）否決的變體同源，需先解決 debug build 誤報爭議；若裁決通過，另需把 timestamp 地雷釘死在計畫
 3. **§P22 權限** / **§P23 crash 鏈快照** → 依需要，兩者 API surface 都待再確認是否值得暴露
+4. **§P25 ImageCache 水位計**（low priority）→ 承接 Issue #158 撤回的需求，不綁 OS 事件
+
+> **🔴 §P21 的一條結構性風險（2026-09-08 查 Google 官方文件發現，此前未載）**：
+> `didHaveMemoryPressure()` 在 Android 端是由 **`onTrimMemory`** 餵的
+> （`packages/flutter/lib/src/widgets/binding.dart:400` → `SystemChannels.system` 的 `memoryPressure`），
+> 而 Google 已將 `onTrimMemory` **多數 callback 標為 deprecated**，只剩
+> `TRIM_MEMORY_UI_HIDDEN` 與 `TRIM_MEMORY_BACKGROUND`，理由是「**它們無法有效預防 LMK 事件**」
+> （來源：<https://developer.android.com/topic/performance/vitals/lmk>）。
+>
+> **意義**：§P21 這個「Dart 層唯一的 OOM 前導信號」，未來**觸發密度可能比原提案假設的更稀疏**。
+> 這不影響 PR #155 已落地實作的正確性，但它是 §P25 的另一個存在理由——
+> **押注單一 OS 事件的排查路徑有結構性上限，主動量測不受此限**。
 
 > 各項寫入路徑：§P20 新增 `lib/src/models/jank_entry.dart` + `lib/src/inspectors/jank_inspector.dart` + 動 `inspector_registry.dart`/`flutter_inspector.dart`/`console_tab.dart`；§P21/§P22/§P23 皆強化既有維度，不新增檔案。
 
@@ -1269,7 +1464,7 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
 | 項目 | 內容 | 寫入路徑 | Effort | 狀態 |
 |------|------|----------|:---:|:---:|
 | **§P7** Error 高亮強化 | error 行淡紅底色 | `console_tab.dart` 的 `_LogEntryRow` / `_NetworkEntryRow` | trivial | ✅ PR #101 |
-| **§P11 → §P1** 錯誤爆發偵測（**綁定**） | 先重構通知 channel，再接 error 計數 + 告警 | `network_notifier.dart` → `flutter_inspector.dart` + `dashboard_modal.dart` | low + low | ⬜ 下一順位 |
+| ~~**§P11**~~ → **§P1** 錯誤爆發偵測 | ~~先重構通知 channel~~（✅ 已隨 §P24 完成），再接 error 計數 + 告警 | `flutter_inspector.dart` + `dashboard_modal.dart` | ~~low +~~ low | ⬜ 下一順位（前提已就緒） |
 | **§P6** Dashboard Badge | tab 的 error count badge | `dashboard_modal.dart` | low | ✅ `b4846ea` |
 | **§D6** Inspector 自身頁面污染 NavigatorTab | 收斂 inspector 內部 push 的識別（**方案 B**），讓 detail view 不進使用者導航軌跡 | 新增 helper + `navigator_observer.dart` + 4 處 dashboard 呼叫端 | low | ✅ 已完成 |
 
@@ -1277,7 +1472,9 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
 >
 > **§P7 已完成**（PR #101，2026-07-25 合入 main）。實際成本確如預估的 trivial，但 diff 主體不在高亮本身——動工才發現「網路請求是否失敗」的判定在三處各手寫一份且已漂移，收斂成 `NetworkEntry.isFailed` 並一併修掉 errorType-only 失敗不產生錯誤群組的既有 bug（見 §P7 實作現況）。**這是本輪的一條經驗**：trivial 項目的成本估在「要寫的程式碼」上通常準，但會低估「動到的既有判定有多少份」。
 >
-> **下一步：§P11 → §P1。§P11 必須排在 §P1 之前**，否則會被迫在 `NetworkNotifier` 內長 if/else 區分「網路摘要」與「錯誤爆發」兩種通知語意。§P14 若要做，併入 §P7 的高亮機制，不單獨排程——§P7 已完成，該機制（`_kErrorRowTint` + 逐 Row 的 `tileColor` 判斷）現已存在，屆時只需多認一種 `data` flag。
+> **📝 更新（2026-09-06）**：**§P11 已隨 §P24 Crash 系統通知完成**（Issue #156），下句的「§P11 必須排在 §P1 之前」已成既成事實——通知 id/channel 已參數化，**§P1 動工時前提已就緒**，Tier 2 剩餘工作僅 §P1 本身。
+>
+> ~~**下一步：§P11 → §P1。§P11 必須排在 §P1 之前**，否則會被迫在 `NetworkNotifier` 內長 if/else 區分「網路摘要」與「錯誤爆發」兩種通知語意。~~ §P14 若要做，併入 §P7 的高亮機制，不單獨排程——§P7 已完成，該機制（`_kErrorRowTint` + 逐 Row 的 `tileColor` 判斷）現已存在，屆時只需多認一種 `data` flag。
 
 ### Tier 3 · 檢索既有資訊（原 Phase 1，已降級）
 
@@ -1298,6 +1495,7 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
 | **§P4** 快速複製 Diagnostic Snippet | NetworkDetailView 一鍵 cURL + error payload | trivial~low | ⬜ |
 | **§P16** 生態日誌適配器 | `logger` (LogOutput) / `talker` (Observer) / `logging` 純介面轉譯適配器與 README 接線食譜 | trivial~low | ⬜ |
 | **§P18** 輕量網路效能統計條 | NetworkTab 頂部純計算 Stats Bar (Total / Fail / Avg Latency / Bytes) | low | ⬜ |
+| **§P25** ImageCache 水位計 | Storage tab 內常駐顯示 `currentSizeBytes`/`maximumSizeBytes`/張數，**打開時才讀不輪詢**；不開新 Performance tab | low | ⬜ |
 | **§P19** StackTrace 非同步鏈正規化 | 框架噪聲折疊 (`[... N frames of framework internals]`) 與非同步中斷因果鏈還原 | low~med | ✅ |
 | **§D4** DatabaseTab 搜尋/過濾 | 搜尋 + operation FilterChip | low~med | ⬜ |
 | **§P17** 原生折疊式 JSON 樹狀檢視器 | `JsonTreeViewer` 遞迴節點展開、語法高亮、路徑複製與搜尋 | med | ⬜ |

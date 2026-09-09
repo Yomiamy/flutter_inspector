@@ -1306,7 +1306,7 @@ Orchestrator 維護一份持續更新的 `progress.md`，記錄：已完成的 M
 > ⚠️ **已知邊界**：Claude 無法自行清空 context，故批次為「自動接續 + 使用者 `/clear` 換場」
 > 而非全自動。真無人值守需走 cron 驅動（每次喚醒即全新 context），未實作。
 
-> **流程教訓**：本文件與 `2026-09-01-features-brainstorm.md` 兩份腦力激盪文件，
+> **流程教訓**：本文件與 `2026-09-08-features-brainstorm.md` 兩份腦力激盪文件，
 > 累計已出現 **7 次「標為待辦、實際已完成」**（features 側：§D6、§P8；
 > workflow 側：§5.1~§5.4 四項，以及 **§3(B) 第 4 項 Guide→Sensor**——
 > 該項於 `a557dfc`（2026-08-19）落地為 `.claude/hooks/wf-guard-delegate-cwd.sh`，
