@@ -3,6 +3,7 @@
 > **建立日期**：2026-06-25（原始檔名）
 >
 > **📝 更新紀錄 (Changelog)**：
+> * **2026-09-08**：**§P21 附加 ImageCache 水位案（Issue #158）實作完成後整案撤回**——原想在 memory pressure 那筆 warning 尾巴附上 `imageCache 98.2 MB/100.0 MB (212 imgs)`，賣點是「水位只有 3 MB 就能排除圖片方向」的否證能力。實作完成、584 測試全綠、analyze 零新增，但 code review 階段以 spy observer 實測發現 **`PaintingBinding.handleMemoryPressure()`（`painting/binding.dart:160`）在通知 observer 之前就 `imageCache.clear()`**，`didHaveMemoryPressure()` 內讀到的分子與張數**恆為 0**（`BEFORE: size=256 count=1` → `INSIDE observer: size=0 count=0`）。功能因此永遠輸出 `imageCache 0 B/...`，賣點反轉為**假否證**（會讓排查者排除正確方向），踩到 Anti-Feature #3「假精度比沒有資訊更糟」的判準，故 branch 重置、零程式碼留下。已查證 3.41.9 與 3.44.1 該兩段程式碼逐字相同（涵蓋整個支援範圍）、真實 OS 事件同路徑、`liveImageCount` 亦為 0。該需求改由**新增的 §P25 ImageCache 水位計**承接（主動查看時讀取，不綁 OS 事件）。同時新增「2026-09-08 記憶體觀測選項全面評估」表（RSS+Swap / LMK / bitmap 對齊 / 兩種水位讀法共五項逐一判定）與 §P21 的 `onTrimMemory` deprecation 風險註記。**本案的方法論教訓已寫入 §P21 撤回紀錄：查證「API 存在且可讀」不等於查證「在我要讀的那個時點，讀到的值有意義」。** 檔名日期前綴由 `2026-09-01` 更新至 `2026-09-08`。
 > * **2026-09-04**：**官方 `dart-lang/leak_tracker` 深度評估與架構裁決**——針對官方記憶體洩漏分析套件深入研究其運作機制（Flutter `MemoryAllocations`、`Finalizer`、`WeakReference`、`reachabilityBarrier`、`vm_service`）、執行時期代價（`forceGC` 之激進記憶體分配造成的嚴重 Jank、定時輪詢與堆疊捕獲開銷）及跨平台限制（Web/WASM 下 Retaining Path 為 null、無法建立 VM Service WebSocket、`reachabilityBarrier` 不可用）。從 Linus 模式五層分解進行裁決，確立「堅決拒絕 Direct In-App 內建整合」的鐵律，更新第 2 節矩陣評分，增補第 3 節「核心決策三：拒絕 In-App 記憶體洩漏追蹤」，並提供純記錄導向之可選適配（Adapter/Recipe）規範。
 > * **2026-09-04**：**§P21 記憶體壓力事件完成**——PR #155 合入 main（issue #154）。落地形式與原提案的差異只有一處：原本「二擇一待定」的旗標選擇**已裁決併入既有 `captureLifecycleEvents`**，不新增 `captureMemoryPressure`——兩者是同一個 observer 上的 callback、共用同一組 attach/detach，拆兩個旗標只是多一個特殊情況。其餘照提案落地：`LifecycleHandler` 多覆寫一個 `didHaveMemoryPressure()`，記為 `LogLevel.warning`（非 info——這是 OOM/LMK 前導信號，必須能被既有 warning/error 過濾撈起來，不能沉在資訊流裡），沿用既有 `topPageLabel` 後綴，零新增 Entry/Inspector/RingBuffer、零新相依。callback 內以 try-catch 包住：本套件 SDK 下限（Flutter >=3.10.0）的 `handleMemoryPressure()` 逐一走訪 observer 且**無** per-observer try-catch（per-observer 保護是 3.44.0 才加入），逸出的例外會中斷廣播、波及排在後面的每個 observer。`example/` 另補一顆 `Simulate Memory Pressure` 按鈕（走 `WidgetsBinding.instance.handleMemoryPressure()`，與 OS 真實回報同一條 observer 廣播路徑）。檔名日期前綴由 `2026-09-01` 更新至 `2026-09-04`。
 > * **2026-08-28**：**新增第六部分：開源除錯與日誌生態套件全面評估與整合策略**——針對社群主流除錯與日誌套件（涵蓋 talker_flutter, logger, alice/chucker_flutter, flutter_mxlogger, logging, logarte, stack_trace, flutter_ume, catcher 等 20+ 套件）進行 4 大維度深度評估（架構相容性、輕量與效能、UI/UX 視覺呈現、社群活力與穩定度）。以 Linus 模式核心判斷「拒絕重型黑盒全家桶替換核心、嚴守 Anti-Features（拒絕本機落盤與強依賴注入）」，並提出 4 項高 ROI、零新相依的務實整合提案（§P16 生態適配器 LogOutput/TalkerObserver、§P17 原生折疊 JSON 樹狀檢視器、§P18 輕量網路效能統計條、§P19 StackTrace 非同步鏈正規化）。
@@ -1181,6 +1182,94 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
 * **鏈推斷價值**：把 OOM 前唯一的 Dart 層前導信號插進時間軸，讓 crash 前的 memory pressure 與其之前的 network/route/db 並排，讀出「壓力密集出現在載入大圖之後」這種因果推斷。
 * **Effort**：trivial ｜ **排查價值**：⭐⭐⭐⭐（強化既有維度，零風險，建議當暖身第一項）
 
+#### ❌ 曾嘗試強化並整案撤回：附加 ImageCache 水位（Issue #158 · 2026-09-08）
+
+> **結論先講**：**這條路不通，別再提**。不是實作沒做好——實作做完了、584 測試全綠、
+> analyze 零新增，是**功能的前提被 SDK 行為打穿**。Issue #158 的分支已重置，零程式碼留下。
+
+**原提案**：在既有那筆 warning 的訊息尾巴附上事件當下的 ImageCache 水位——
+
+```
+現況：Memory pressure · HomePage (/home)
+提案：Memory pressure · HomePage (/home) · imageCache 98.2 MB/100.0 MB (212 imgs)
+```
+
+賣點是**否證能力**：水位只有 3 MB 就能當場排除圖片方向，省下翻圖片程式碼的時間。
+「排除一個方向與指出一個方向同等有用」——這個論點本身沒錯，錯的是它建立在
+「pressure 當下讀得到有意義的水位」這個**未經查證的假設**上。
+
+**死因：`PaintingBinding` 在通知 observer 之前就把快取清空了。**
+
+```dart
+// packages/flutter/lib/src/painting/binding.dart:160
+@override
+void handleMemoryPressure() {
+  super.handleMemoryPressure();
+  imageCache.clear();                      // ← 先清空
+}
+
+// packages/flutter/lib/src/widgets/binding.dart:1372
+@override
+void handleMemoryPressure() {
+  super.handleMemoryPressure();            // ← 這一步走到上面那個 clear()
+  for (final observer in List.of(_observers)) {
+    observer.didHaveMemoryPressure();      // ← 才輪到我們讀
+  }
+}
+```
+
+關鍵在 mixin 順序：`WidgetsFlutterBinding` 的清單是
+`... PaintingBinding, SemanticsBinding, RendererBinding, WidgetsBinding`，
+**`WidgetsBinding` 在最後、其覆寫最先執行**，而它第一件事就是 `super`——
+往前走到 `PaintingBinding` 執行 `imageCache.clear()`。清空完成後，才輪到通知 observer。
+
+**實測證據**（spy observer 讀同一個 cache 實例，非推論）：
+
+```
+BEFORE pressure:  size=256  count=1
+INSIDE observer:  size=0    count=0      ← didHaveMemoryPressure() 讀到的
+AFTER  pressure:  size=0    count=0
+```
+
+**後果是功能價值歸零，且反轉為危害**：該功能永遠只會輸出
+`imageCache 0 B/100.0 MB (0 imgs)`——分子與張數恆為 0，唯一有值的是分母
+（`maximumSizeBytes`，`clear()` 不動它）。於是原本的兩列判別塌成一列：
+
+| 原設計預期顯示 | 實際永遠顯示 | 排查者會得到的結論 |
+|:---|:---|:---|
+| `98.2 MB/100.0 MB` → 圖片層有事 | — | 永遠看不到 |
+| `3.1 MB/100.0 MB` → 不是圖片 | `0 B/100.0 MB` | **「不是圖片問題」——即使圖片正是問題** |
+
+這是**假否證**：它會讓排查者主動排除正確的方向。踩到的正是本文件在
+**Anti-Feature #3（拒絕 HAR timing 的假精度）** 與第七部分**拒絕「總記憶體估算值」**
+時用的同一條判準——**假精度比沒有資訊更糟**，因為讀者會照著錯的數字推錯方向。
+
+**已排除的變通方案**（皆實查，非推測）：
+
+| 方案 | 判定 |
+|:---|:---|
+| 改讀 `liveImageCount`（`clear()` 不清 live images） | ❌ 實測在 observer 內同為 **0**，無可用的替代存活指標 |
+| 只在測試環境有問題、真實 OS 事件不同路 | ❌ 不成立。`services/binding.dart:177` 收到系統 `memoryPressure` 訊息後走**同一個** `handleMemoryPressure()`，沒有第二條路徑 |
+| 只是某個 SDK 版本的行為 | ❌ 不成立。3.41.9 與 3.44.1 上述兩段程式碼**逐字相同**，涵蓋 `pubspec.yaml` 宣告的整個支援範圍（`flutter: ">=3.10.0"`） |
+| 覆寫 binding，在 clear 之前取值 | ❌ 要求 host 改用套件提供的 custom binding，破壞「接線零改動」前提，成本遠超價值 |
+
+> **該需求的正確形狀是 §P25（ImageCache 水位計）**——不綁任何 OS 事件，
+> 在使用者主動查看的那一刻讀取，那個時點的值是真的。
+
+**🔴 本案最該記住的教訓（方法論，不是技術細節）**：
+
+規格階段確實做了實查，查證的是「`currentSizeBytes` / `maximumSizeBytes` / `currentSize`
+三個 getter 存在、公開、純 Dart、零相依、O(1)」——**這些全部正確**。
+但**沒有查證「在 `didHaveMemoryPressure()` 這個時點，讀到的值是否有意義」**。
+
+**前者是 API 存在性，後者才是功能可行性。把前者當成後者的證明，就是這次的失誤。**
+review 階段的 mutation testing 之所以能揭穿它，是因為它問的不是「API 在不在」，
+而是「改壞了測試會不會叫」——四個接線 mutation 有三個逃逸，才順藤摸瓜挖出恆零的根因。
+
+> **可執行的防範規則**：日後規格涉及「在特定時點讀取外部狀態」時，
+> **必須實測該時點的值**（寫個 spy/probe 跑一次），不能只確認 API 存在。
+> 這條成本是十幾行拋棄式測試碼，換掉的是一整輪實作 + review + 撤回。
+
 ### §P22. 權限被拒便利方法（`permissionDenied(...)`）— 🆕 弱但有用
 
 * **痛點**：Permission Denials 是 Additional vital。但 Flutter framework **無任何 permission binding**——沒有可被動訂閱的全域信號源（實查 `network_notifier_io.dart`：kit 只在自己的 call site 拿得到權限回傳值）。
@@ -1215,6 +1304,67 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
   > **且 `example/` 不能當關卡**（2026-09-06 實測）：它依賴 ObjectBox（native-only、`dart:ffi`），在該目錄跑 `flutter build web` **永遠失敗且與本功能無關**。正解是建一個只依賴本套件的最小 harness，讓兩個建構式都進編譯圖後 `flutter build web`——**編譯器擋得住，人眼擋不住**。
 * **Effort**：low（實際落地 5 任務）｜ **排查價值**：⭐⭐⭐⭐（補上網路／崩潰的通知不對稱，QA 背景測試場景剛需）
 
+### §P25. ImageCache 水位計（Image Cache Gauge）— 🆕 low priority
+
+> **本項是 Issue #158 那個需求唯一可行的形狀**。該案想在 memory pressure 事件當下讀水位，
+> 但 `PaintingBinding` 在通知 observer 前就清空快取，讀到的恆為 0（完整死因見 §P21 的
+> 撤回紀錄）。**本項不綁任何 OS 事件**——在使用者主動查看的那一刻讀取，那個時點的值是真的。
+
+* **設計方向**：
+  - Dashboard 內常駐顯示 `currentSizeBytes` / `maximumSizeBytes` 與 `currentSize`（張數）
+  - **打開時才讀，不輪詢**（三個 getter 都是 O(1)，沒有輪詢的理由；加輪詢就踩 Anti-Feature #1）
+* **建議位置：Storage tab 內加一區**（`lib/src/ui/dashboard/tabs/storage_tab.dart`）
+  - imageCache 本質是**即時查詢型**，與 CLAUDE.md 不變式 #3 的 Browser Source 分流**同構**
+    ——呼叫時即時拉取、**不進 `RingBuffer`、不進 timeline、不加第五個 `TimelineSource`**
+  - Storage tab 在 host 未註冊 source 時是空的（`flutter_inspector.dart:218` 明載套件不內建
+    任何 `KeyValueBrowserSource`），剛好給它一個永遠有內容的區塊
+  - **🔴 明確不開新的 Performance tab**：為單一 widget 開一個 tab 是過度工程，且會誘導未來
+    往裡塞 FPS／jank 指標，**直接滑向 Anti-Feature #1**。這條先寫死，別日後重議
+* **價值（四項，第 2 項是 §P21 那條路根本給不了的）**：
+  1. **主動量測**，不必等 OS 出手——這才是 Google bitmap memory 頁面實際要求開發者做的事
+  2. **能驗證修改有沒有效**：改 `cacheWidth` / `RGB_565` / 快取上限後，同一頁面改前 98 MB、
+     改後 31 MB，一眼可證。**綁 pressure 事件的做法給不了這個**——就算它讀得到值，
+     修對之後 pressure 就不來了，反而失去量測手段
+  3. **有分母才看得出 LRU thrashing**：`98.2/100.0`（頂到上限、圖片反覆被踢掉又重載，
+     此時 NetworkTab 會看到同一張圖被抓多次，兩條線索互相印證）vs `98.2/500.0`（只是用得多）
+  4. **回收行為可觀察**：切背景再回來、pop 掉圖片牆頁面，看水位有沒有降
+* **🔴 必守的誠實劃界（本項最大風險是誤導，不是技術）**：
+  - 標題**必須寫 "Image Cache"**，不可寫 "Memory" 或 "RAM"
+  - **絕不可湊一個「總記憶體用量」估算值**——WebView 內的圖、native plugin、`dart:ffi`
+    配置的記憶體**全都不在此帳上**（cache 顯示 3 MB 而 app 實吃 800 MB 完全可能）
+  - 判準同 Anti-Feature #3：**假精度比沒有資訊更糟**。§P21 撤回案就是活生生的反例
+* **重用**：`PaintingBinding.instance.imageCache` 三個現成 getter、既有 `formatBytes`
+  （`lib/src/utils/network_formatters.dart:48`，支援 B/KB/MB/GB/TB）。零新相依。
+* **不做**：定時輪詢、歷史曲線、「快取未回收 = 洩漏」的自動判定
+  （LRU 正常行為就會讓水位不降，要判定異常就得堆閾值與例外補丁——那正是 2026-09-04
+  否決 `leak_tracker` 的第 2 層理由，換個包裝而已）
+* **Effort**：low ｜ **排查價值**：⭐⭐⭐
+
+### 📌 2026-09-08 記憶體觀測選項全面評估（Issue #158 期間，避免日後重提）
+
+使用者引用 Google Play 三個 Vitals 頁面（[memory-usage](https://developer.android.com/topic/performance/vitals/memory-usage)
+／[lmk](https://developer.android.com/topic/performance/vitals/lmk)
+／[bitmap-memory-usage](https://developer.android.com/topic/performance/vitals/bitmap-memory-usage)）
+詢問本套件能否做記憶體洩漏警示或顯示記憶體資訊。逐項實查後結論如下，**前四項已否決，勿再提案**：
+
+| 選項 | 判定 | 依據（皆實查，非推測） |
+|:---|:---:|:---|
+| **Anonymous RSS + Swap 數值** | ❌ **拿不到** | Google 官方頁面明載「**No in-app API exists** for reading this metric」，資料由 OS telemetry 收集後經 Play Console 呈現。`ProcessInfo.currentRss`（`dart:io`）存在，但①它是 Dart VM 進程 RSS、非 Google 定義的 anonymous RSS+swap；②本套件**刻意從不引入 `dart:io`**（`lib/src/models/diagnostic_info.dart:41` 明載此為 WASM 相容前提）|
+| **LMK 事件偵測** | ❌ **需 platform channel** | Google 推薦的是 `ApplicationExitInfo` + `REASON_LOW_MEMORY`，為 Kotlin/Java API，語意是「**下次啟動時回讀**上次為何被殺」而非即時信號。Dart 層無對應 binding |
+| **Bitmap memory 宣稱對齊 Play Console** | ❌ **假精度** | `imageCache` 是 Flutter 自己的圖片快取帳面，**不等於** OS 統計的 bitmap memory（後者含 malloc heap、shared memory、graphics buffer）|
+| **ImageCache 水位 — 掛在 memory pressure 事件上** | ❌ **讀到的恆為 0** | `PaintingBinding.handleMemoryPressure()` 在通知 observer 前先 `imageCache.clear()`。Issue #158 實作完成後整案撤回，實測證據見 §P21 撤回紀錄 |
+| **ImageCache 水位 — 使用者主動查看時讀取** | ✅ **可做** | 見上方 §P25。讀取時點由使用者決定，不受 `clear()` 影響 |
+
+> **🔴 判準沿革（引用時務必分辨，否則會推導出錯誤的相鄰結論）**：
+> 本表的否決與 2026-09-04 否決 `leak_tracker` 的**理由完全不同**——
+> - 本表前三項是「**Dart 層拿不到**，或拿到的不是那個東西」（**能力邊界**）
+> - 第四項是「**拿得到，但在那個時點讀到的值無意義**」（**時序問題**）
+> - `leak_tracker` 是「**拿得到，但代價不可接受**」（`forceGC()` 反覆生成長度 30,000 的
+>   List 逼 Full GC、Web 上 Retaining Path 恆為 null、Profile 模式因 `assert` 被消除而靜默失效）
+>
+> 三種否決不可混用。例如「記憶體資訊拿不到」這句話對第四項是**錯的**——它拿得到，
+> 只是讀的時機不對，而那正是 §P25 能成立的原因。
+
 ### ❌ app 內不可觀測（誠實劃界，勿浪費工）
 
 以下 Google 信號的核心部分在 Dart 執行之前、或 OS/build 層，kit **無法觀測**，不應為湊數硬做代理：
@@ -1229,9 +1379,24 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
 
 ### 第七部分優先順序建議
 
-1. ~~**§P21 記憶體壓力**（trivial、強化既有、零風險）→ 暖身首選~~ → **✅ 已完成（PR #155）**
+1. ~~**§P21 記憶體壓力**（trivial、強化既有、零風險）→ 暖身首選~~ → **✅ 已完成（PR #155）**。
+   Issue #158 曾嘗試為它附加 ImageCache 水位以補強收斂能力，**實作完成後因 SDK 行為整案撤回**
+   （`PaintingBinding` 先清快取才通知 observer，讀到的恆為 0；死因與實測見上方 §P21 撤回紀錄）。
+   該需求改由 **§P25 水位計**承接（low priority，主動查看時讀取，不綁 OS 事件）
 2. **§P20 掉幀維度**（旗艦、對齊 Core Vital、鏈推斷價值最高）→ **⚠️ 目前為「待裁決」而非待辦**：與 Anti-Feature #1（2026-08-14 覆核）否決的變體同源，需先解決 debug build 誤報爭議；若裁決通過，另需把 timestamp 地雷釘死在計畫
 3. **§P22 權限** / **§P23 crash 鏈快照** → 依需要，兩者 API surface 都待再確認是否值得暴露
+4. **§P25 ImageCache 水位計**（low priority）→ 承接 Issue #158 撤回的需求，不綁 OS 事件
+
+> **🔴 §P21 的一條結構性風險（2026-09-08 查 Google 官方文件發現，此前未載）**：
+> `didHaveMemoryPressure()` 在 Android 端是由 **`onTrimMemory`** 餵的
+> （`packages/flutter/lib/src/widgets/binding.dart:400` → `SystemChannels.system` 的 `memoryPressure`），
+> 而 Google 已將 `onTrimMemory` **多數 callback 標為 deprecated**，只剩
+> `TRIM_MEMORY_UI_HIDDEN` 與 `TRIM_MEMORY_BACKGROUND`，理由是「**它們無法有效預防 LMK 事件**」
+> （來源：<https://developer.android.com/topic/performance/vitals/lmk>）。
+>
+> **意義**：§P21 這個「Dart 層唯一的 OOM 前導信號」，未來**觸發密度可能比原提案假設的更稀疏**。
+> 這不影響 PR #155 已落地實作的正確性，但它是 §P25 的另一個存在理由——
+> **押注單一 OS 事件的排查路徑有結構性上限，主動量測不受此限**。
 
 > 各項寫入路徑：§P20 新增 `lib/src/models/jank_entry.dart` + `lib/src/inspectors/jank_inspector.dart` + 動 `inspector_registry.dart`/`flutter_inspector.dart`/`console_tab.dart`；§P21/§P22/§P23 皆強化既有維度，不新增檔案。
 
@@ -1330,6 +1495,7 @@ Google 的 10 類信號中，**6 類的核心信號在 Dart 執行之前或 OS/b
 | **§P4** 快速複製 Diagnostic Snippet | NetworkDetailView 一鍵 cURL + error payload | trivial~low | ⬜ |
 | **§P16** 生態日誌適配器 | `logger` (LogOutput) / `talker` (Observer) / `logging` 純介面轉譯適配器與 README 接線食譜 | trivial~low | ⬜ |
 | **§P18** 輕量網路效能統計條 | NetworkTab 頂部純計算 Stats Bar (Total / Fail / Avg Latency / Bytes) | low | ⬜ |
+| **§P25** ImageCache 水位計 | Storage tab 內常駐顯示 `currentSizeBytes`/`maximumSizeBytes`/張數，**打開時才讀不輪詢**；不開新 Performance tab | low | ⬜ |
 | **§P19** StackTrace 非同步鏈正規化 | 框架噪聲折疊 (`[... N frames of framework internals]`) 與非同步中斷因果鏈還原 | low~med | ✅ |
 | **§D4** DatabaseTab 搜尋/過濾 | 搜尋 + operation FilterChip | low~med | ⬜ |
 | **§P17** 原生折疊式 JSON 樹狀檢視器 | `JsonTreeViewer` 遞迴節點展開、語法高亮、路徑複製與搜尋 | med | ⬜ |
